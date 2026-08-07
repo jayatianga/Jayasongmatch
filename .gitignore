@@ -1,0 +1,5 @@
+node_modules/
+package-lock.json
+*.wav
+.DS_Store
+__pycache__/

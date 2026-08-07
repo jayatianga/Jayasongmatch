@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jayasongmatch — harmony part recorder</title>
+<link rel="stylesheet" href="css/app.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎙️</text></svg>" />
+</head>
+<body>
+
+<header class="transport">
+  <div class="brand">
+    <span class="brand-mark">🎙️</span>
+    <div>
+      <div class="brand-name">Jayasongmatch</div>
+      <div class="brand-sub" id="project-name">No project</div>
+    </div>
+  </div>
+
+  <div class="group input-group">
+    <label class="field">
+      <span>Input</span>
+      <select id="device-select" title="Any Windows capture device: interface input, USB mic, or a loopback such as Stereo Mix"></select>
+    </label>
+    <label class="field narrow">
+      <span>Ch</span>
+      <select id="channel-select" title="Which channel of a multi-channel interface to record"></select>
+    </label>
+    <button id="refresh-devices" class="icon-btn" title="Rescan Windows input devices">⟳</button>
+    <div class="meter" title="Input level"><div class="meter-fill" id="input-meter"></div></div>
+    <button id="monitor-btn" class="toggle" title="Hear yourself through the app (use headphones)">Monitor</button>
+  </div>
+
+  <div class="group transport-group">
+    <button id="rewind-btn" class="icon-btn" title="Back to start (Home)">⏮</button>
+    <button id="play-btn" class="play-btn" title="Play / stop (Space)">▶</button>
+    <button id="record-btn" class="record-btn" title="Record the armed part (R)">●</button>
+    <div class="clock" id="clock">0:00.00</div>
+    <button id="loop-btn" class="toggle" title="Loop the region (shift-drag on the ribbon to set it)">Loop</button>
+    <button id="click-btn" class="toggle" title="Metronome during playback">Click</button>
+  </div>
+
+  <div class="group master-group">
+    <label class="field narrow">
+      <span>BPM</span>
+      <input id="bpm-input" type="number" min="30" max="300" step="1" />
+    </label>
+    <label class="field slider-field">
+      <span>Master</span>
+      <input id="master-volume" type="range" min="0" max="1.2" step="0.01" value="0.9" />
+    </label>
+    <button id="settings-btn" class="icon-btn" title="Settings, latency calibration and export">⚙</button>
+  </div>
+</header>
+
+<main>
+  <aside class="panel library-panel">
+    <div class="panel-head">
+      <h2>Library</h2>
+      <button id="new-project-btn" class="small-btn">New</button>
+    </div>
+    <div class="tabs">
+      <button class="tab active" data-tab="songs">Songs</button>
+      <button class="tab" data-tab="drills">Drills</button>
+      <button class="tab" data-tab="projects">Saved</button>
+    </div>
+    <div class="panel-body" id="library-list"></div>
+    <div class="panel-foot">
+      <button id="import-backing-btn" class="wide-btn">Import backing / reference audio…</button>
+      <input type="file" id="backing-input" accept="audio/*" hidden />
+      <div class="hint" id="backing-info">No backing track loaded</div>
+    </div>
+  </aside>
+
+  <section class="stage">
+    <div class="stage-head">
+      <div class="part-title">
+        <span class="swatch" id="part-swatch"></span>
+        <h2 id="part-name">No part selected</h2>
+        <span class="tag" id="part-range"></span>
+      </div>
+      <div class="stage-actions">
+        <select id="section-select" title="Jump to a section and loop it"></select>
+        <button id="target-btn" class="small-btn">Target notes…</button>
+        <button id="use-take-target-btn" class="small-btn" title="Turn the selected take into the target for this part">Take → target</button>
+        <button id="tone-btn" class="small-btn" title="Play the first target note so you can pitch your entry">Give me the note</button>
+        <button id="fit-btn" class="small-btn">Fit</button>
+      </div>
+    </div>
+
+    <div class="ribbon-wrap">
+      <canvas id="ribbon"></canvas>
+      <div class="ribbon-hint">Click to seek · Shift-drag to set a loop · Ctrl-wheel to zoom</div>
+    </div>
+
+    <div class="tuner" id="tuner">
+      <div class="tuner-note" id="tuner-note">—</div>
+      <div class="tuner-scale">
+        <div class="tuner-band"></div>
+        <div class="tuner-needle" id="tuner-needle"></div>
+        <div class="tuner-centre"></div>
+      </div>
+      <div class="tuner-cents" id="tuner-cents">Live tuning</div>
+    </div>
+
+    <div class="scorecard" id="scorecard">
+      <div class="empty-state">Record a take to see your accuracy for this part.</div>
+    </div>
+  </section>
+
+  <aside class="panel mixer-panel">
+    <div class="panel-head">
+      <h2>Parts</h2>
+      <button id="add-part-btn" class="small-btn">Add</button>
+    </div>
+    <div class="panel-body" id="mixer-list"></div>
+    <div class="panel-foot">
+      <button id="export-mix-btn" class="wide-btn">Export mix as WAV</button>
+      <div class="hint">Solo and mute apply to the export.</div>
+    </div>
+  </aside>
+</main>
+
+<dialog id="target-dialog" class="dialog">
+  <form method="dialog">
+    <h3>Target notes — <span id="target-dialog-part"></span></h3>
+    <p class="dialog-hint">
+      One entry per note. Sequential form <code>C4:4</code> is a note and its length in beats
+      (<code>R:2</code> is a rest). Absolute form <code>C4 @3.5 1.25</code> is a note at 3.5 s
+      lasting 1.25 s. Mix both freely.
+    </p>
+    <textarea id="target-text" spellcheck="false" rows="12"></textarea>
+    <div class="dialog-row">
+      <button type="button" id="target-octave-up" class="small-btn">Octave ↑</button>
+      <button type="button" id="target-octave-down" class="small-btn">Octave ↓</button>
+      <span class="dialog-status" id="target-status"></span>
+    </div>
+    <menu>
+      <button value="cancel" class="small-btn">Cancel</button>
+      <button value="save" id="target-save" class="small-btn primary">Save targets</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="settings-dialog" class="dialog">
+  <form method="dialog">
+    <h3>Settings</h3>
+    <div class="settings-grid">
+      <label class="field block">
+        <span>Latency offset (ms)</span>
+        <input id="latency-input" type="number" step="1" />
+        <small>Positive values pull recorded takes earlier. Run calibration to measure it.</small>
+      </label>
+      <label class="field block">
+        <span>Count-in (beats)</span>
+        <input id="countin-input" type="number" min="0" max="16" step="1" />
+      </label>
+      <label class="field block">
+        <span>Transpose targets (semitones)</span>
+        <input id="transpose-input" type="number" min="-24" max="24" step="1" />
+        <small>Move every part to fit your range without re-entering notes.</small>
+      </label>
+      <label class="field block">
+        <span>Tuning reference A4 (Hz)</span>
+        <input id="a4-input" type="number" min="400" max="480" step="0.5" />
+      </label>
+      <label class="field block checkbox">
+        <input id="octave-agnostic" type="checkbox" />
+        <span>Ignore octave errors when scoring</span>
+      </label>
+      <label class="field block">
+        <span>Section anchor (s)</span>
+        <input id="anchor-input" type="number" step="0.01" />
+        <small>Where bar 1 starts, for lining sections up with imported audio.</small>
+      </label>
+    </div>
+    <div class="dialog-row">
+      <button type="button" id="calibrate-btn" class="small-btn">Calibrate latency</button>
+      <span class="dialog-status" id="calibrate-status">Plays four clicks and listens for them. Use headphones off / speakers on, or a loopback input.</span>
+    </div>
+    <div class="dialog-row">
+      <button type="button" id="delete-project-btn" class="small-btn danger">Delete this project</button>
+    </div>
+    <menu>
+      <button value="close" class="small-btn primary">Done</button>
+    </menu>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" hidden></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
