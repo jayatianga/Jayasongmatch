@@ -69,6 +69,7 @@
     <div class="panel-foot">
       <button id="import-backing-btn" class="wide-btn">Import backing / reference audio…</button>
       <input type="file" id="backing-input" accept="audio/*" hidden />
+      <input type="file" id="part-ref-file" accept="audio/*" hidden />
       <div class="hint" id="backing-info">No backing track loaded</div>
     </div>
   </aside>
@@ -94,6 +95,13 @@
       <div class="ribbon-hint">Click to seek · Shift-drag to set a loop · Ctrl-wheel to zoom</div>
     </div>
 
+    <div class="lyric-band" id="lyric-band">
+      <div class="lyric-prev" id="lyric-prev"></div>
+      <div class="lyric-current placeholder" id="lyric-current">No lyrics yet — open the Lyrics tab below to add the words.</div>
+      <div class="lyric-next" id="lyric-next"></div>
+      <div class="lyric-progress"><div id="lyric-progress-fill"></div></div>
+    </div>
+
     <div class="tuner" id="tuner">
       <div class="tuner-note" id="tuner-note">—</div>
       <div class="tuner-scale">
@@ -104,8 +112,22 @@
       <div class="tuner-cents" id="tuner-cents">Live tuning</div>
     </div>
 
-    <div class="scorecard" id="scorecard">
-      <div class="empty-state">Record a take to see your accuracy for this part.</div>
+    <div class="bottom">
+      <div class="bottom-tabs">
+        <button class="btab active" data-btab="score">Score</button>
+        <button class="btab" data-btab="lyrics">Lyrics</button>
+        <div class="bottom-actions" id="lyrics-actions" hidden>
+          <button id="lyrics-edit-btn" class="small-btn">Edit lyrics…</button>
+          <button id="lyrics-tap-btn" class="small-btn" title="Play the track and tap on each line as it comes around">Tap to time</button>
+          <button id="lyrics-nudge-back" class="small-btn" title="Shift every line 100 ms earlier">−100 ms</button>
+          <button id="lyrics-nudge-fwd" class="small-btn" title="Shift every line 100 ms later">+100 ms</button>
+          <span class="hint" id="lyrics-status"></span>
+        </div>
+      </div>
+      <div class="scorecard" id="scorecard">
+        <div class="empty-state">Record a take to see your accuracy for this part.</div>
+      </div>
+      <div class="lyric-sheet" id="lyric-sheet" hidden></div>
     </div>
   </section>
 
@@ -139,6 +161,36 @@
     <menu>
       <button value="cancel" class="small-btn">Cancel</button>
       <button value="save" id="target-save" class="small-btn primary">Save targets</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="lyrics-dialog" class="dialog">
+  <form method="dialog">
+    <h3>Lyrics — <span id="lyrics-dialog-scope"></span></h3>
+    <p class="dialog-hint">
+      Paste the words, one line per line. Timestamps use the standard LRC form
+      <code>[00:12.34] words here</code>; lines without one can be timed later with
+      <strong>Tap to time</strong>. You can also import a <code>.lrc</code> file.
+      Nothing is supplied with the app — these are your words to add.
+    </p>
+    <label class="field block">
+      <span>These lyrics apply to</span>
+      <select id="lyrics-scope">
+        <option value="song">The whole song (all parts)</option>
+        <option value="part">This part only</option>
+      </select>
+    </label>
+    <textarea id="lyrics-text" spellcheck="false" rows="12" placeholder="[00:00.00] First line&#10;[00:04.50] Second line&#10;Third line, to be timed later"></textarea>
+    <div class="dialog-row">
+      <button type="button" id="lyrics-import-btn" class="small-btn">Import .lrc…</button>
+      <input type="file" id="lyrics-file" accept=".lrc,.txt,text/plain" hidden />
+      <button type="button" id="lyrics-clear-timings" class="small-btn">Clear all timings</button>
+      <span class="dialog-status" id="lyrics-dialog-status"></span>
+    </div>
+    <menu>
+      <button value="cancel" class="small-btn">Cancel</button>
+      <button value="save" id="lyrics-save" class="small-btn primary">Save lyrics</button>
     </menu>
   </form>
 </dialog>

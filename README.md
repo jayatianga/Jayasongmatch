@@ -74,13 +74,69 @@ them, and you will normally use the first:
 anything, so you can move a part into your range. The mixer warns you when a
 part's targets sit outside the usual range for that voice.
 
+### Lyrics, timed to the track
+
+The band under the ribbon shows the line you are singing now, the line before
+it, and the line coming next, with a progress bar running across the current
+line. The **Lyrics** tab at the bottom holds the full sheet — the active line
+highlights and scrolls itself into view, and clicking any line seeks there.
+
+You supply the words; none ship with the app. **Edit lyrics…** takes plain
+pasted text, or timestamped [LRC](https://en.wikipedia.org/wiki/LRC_(file_format))
+which you can also import from a `.lrc` file:
+
+```
+[00:00.00] first line
+[00:04.50] second line
+third line, to be timed later
+```
+
+Lines can also carry **several timestamps** — useful when a refrain comes round
+more than once.
+
+**Timing them without typing numbers:** press **Tap to time**, start playback,
+and press `T` (or click a line) as each one comes around. Each tap stamps the
+next untimed line and moves on. If a line lands early or late, tap it again
+later, or nudge the whole sheet with **−100 ms** / **+100 ms** until the words
+sit against the track.
+
+Lyrics belong to the whole song by default. Set the scope to **This part only**
+when a part sings different words — answering figures, a counter-melody, or the
+wordless vowels the top part often gets.
+
+### Reference playback — hear a part while you sing it
+
+Any part can have a **reference** (a guide) that plays in time underneath you.
+This is the fastest way to learn a line: hear it, then sing along with it, then
+turn it down and sing without it.
+
+- **Set★** on a mixer strip makes the part's currently selected take its
+  reference. Sing the line once, mark it, and it becomes the guide.
+- **Load…** imports an audio file instead — an isolated stem, or a phrase you
+  bounced elsewhere.
+- **Ref** toggles it on and off, and the slider beside it sets its level. Keep
+  it under your own voice.
+
+The important part: **a reference keeps playing while you record that same
+part.** Normally the part you are recording is silenced so you do not sing along
+with your old take — but the reference is exactly what you *do* want to hear, so
+it stays. Both stay in time automatically, because takes remember where on the
+timeline they were recorded.
+
+A reference follows its part's mute and solo, so soloing the part you are
+learning leaves its guide audible and silences everyone else. References are
+excluded from **Export mix as WAV** — the export is your voices, not the things
+you sang against.
+
 ### Recording a part
 
 1. Click **Arm** on the part you want to sing. Only one part is armed at a time.
 2. Optionally pick a section from the **Jump to section…** dropdown — that seeks
    there and loops it.
 3. Press **●** (or `R`). You get a count-in, then everything *except* the part
-   you are recording plays back, so you are singing into the existing stack.
+   you are recording plays back, so you are singing into the existing stack —
+   plus that part's reference, if it has one. The bottom panel switches to the
+   lyrics while you sing and back to the score when you stop.
 4. Press **●** again (or `Space`) to stop. The take is saved, analysed, and
    scored automatically.
 
@@ -183,6 +239,7 @@ back and will also pollute your recording; use headphones.
 | `Space` | Play / stop |
 | `R` | Record / stop |
 | `L` | Toggle loop |
+| `T` | Stamp the next lyric line (while Tap to time is on) |
 | `Home` | Back to the start |
 | `↑` / `↓` | Select the previous / next part |
 
@@ -198,9 +255,10 @@ uses, roughly where each sits in your range, and the order and length of the
 sections, with notes on what makes each one hard. Tempos and keys are the usual
 performance values, and every one of them is editable per project.
 
-They deliberately **do not** contain transcriptions of the recordings. The
-target pitches you are scored against come from you — a reference take you sing,
-a guide stem you import, or notes you type in. The built-in drills are original
+They deliberately **do not** contain transcriptions of the recordings, and no
+lyrics ship with the app at all. Both the target pitches you are scored against
+and the words you follow come from you — a reference take you sing, a guide stem
+you import, notes you type in, and lyrics you paste or load from a `.lrc` file. The built-in drills are original
 exercises written for this app, which is why they can ship with notes attached.
 
 To add your own song, copy an entry in `js/data/songs.js`.
@@ -209,7 +267,8 @@ To add your own song, copy an entry in `js/data/songs.js`.
 
 ## Storage
 
-Projects and audio live in your browser's IndexedDB, per browser profile. They
+Projects, lyrics and audio live in your browser's IndexedDB, per browser
+profile. They
 survive restarts. Clearing site data for `localhost` deletes them, so export
 anything you want to keep with **Export mix as WAV**.
 
@@ -236,7 +295,7 @@ Layout:
 js/audio/    AudioContext graph, transport, mixer, capture worklet, WAV I/O
 js/dsp/      YIN pitch detection, contour tracking, note segmentation
 js/score.js  accuracy scoring
-js/ui/       pitch ribbon canvas, target-note notation
-js/data/     song structures and built-in drills
+js/ui/       pitch ribbon canvas, lyric band and sheet, target-note notation
+js/data/     song structures, built-in drills, LRC lyric timing
 js/state.js  project model and persistence
 ```

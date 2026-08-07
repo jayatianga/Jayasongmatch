@@ -147,6 +147,13 @@ export class Engine {
   }
 
   stop({ silent = false } = {}) {
+    // Freeze where we actually got to, so `position` still reads correctly once
+    // playback has stopped. Stopping during a count-in keeps the intended start
+    // rather than snapping back to zero.
+    if (this.playing) {
+      const reached = this.position;
+      if (reached >= 0) this.startPosition = reached;
+    }
     clearTimeout(this._loopTimer);
     this._loopTimer = null;
     for (const source of this.sources) {

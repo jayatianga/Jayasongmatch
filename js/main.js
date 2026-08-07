@@ -5,9 +5,11 @@ import { Engine } from './audio/engine.js';
 import { InputChain, listInputDevices } from './audio/input.js';
 import { bufferToWav, downloadBlob, blobToAudioBuffer } from './audio/wav.js';
 import { db } from './store/db.js';
-import { Store, createProject, projectSections, projectDuration, activeTake, makeTake, uid } from './state.js';
+import { Store, createProject, projectSections, projectDuration, activeTake, makeTake, uid, lyricsFor, referenceOf, guideTrackId } from './state.js';
 import { SONGS, PART_ROLES } from './data/songs.js';
 import { EXERCISES } from './data/exercises.js';
+import { parseLyrics, formatLyrics, lyricsSummary, clearTimings, shiftLyrics, stampLine, nextUntimedIndex, activeLineIndex } from './data/lyrics.js';
+import { LyricBand, LyricSheet } from './ui/lyrics.js';
 import { Ribbon, colorForCents } from './ui/ribbon.js';
 import { parseTargets, formatTargets, targetsSummary, rangeWarning, shiftTargets } from './ui/noteeditor.js';
 import { midiToName, midiToHz, hzToMidi, centsFrom } from './dsp/notes.js';
@@ -72,6 +74,26 @@ const dom = {
   calibrateStatus: el('calibrate-status'),
   deleteProjectBtn: el('delete-project-btn'),
   toast: el('toast'),
+  lyricPrev: el('lyric-prev'),
+  lyricCurrent: el('lyric-current'),
+  lyricNext: el('lyric-next'),
+  lyricProgress: el('lyric-progress-fill'),
+  lyricSheet: el('lyric-sheet'),
+  lyricsActions: el('lyrics-actions'),
+  lyricsEditBtn: el('lyrics-edit-btn'),
+  lyricsTapBtn: el('lyrics-tap-btn'),
+  lyricsNudgeBack: el('lyrics-nudge-back'),
+  lyricsNudgeFwd: el('lyrics-nudge-fwd'),
+  lyricsStatus: el('lyrics-status'),
+  lyricsDialog: el('lyrics-dialog'),
+  lyricsDialogScope: el('lyrics-dialog-scope'),
+  lyricsScope: el('lyrics-scope'),
+  lyricsText: el('lyrics-text'),
+  lyricsDialogStatus: el('lyrics-dialog-status'),
+  lyricsImportBtn: el('lyrics-import-btn'),
+  lyricsFile: el('lyrics-file'),
+  lyricsClearTimings: el('lyrics-clear-timings'),
+  partRefFile: el('part-ref-file'),
 };
 
 const app = {
@@ -81,13 +103,18 @@ const app = {
   ribbon: null,
   worker: null,
   buffers: new Map(),   // takeId -> AudioBuffer
+  refBuffers: new Map(),// imported reference key -> AudioBuffer
   backingBuffer: null,
   recording: null,      // {trackId, startContextTime, from}
   playhead: 0,
   libraryTab: 'songs',
+  bottomTab: 'score',
   devices: [],
   pendingAnalyses: new Map(),
   analysisSeq: 0,
+  band: null,
+  sheet: null,
+  tapMode: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -103,6 +130,17 @@ async function boot() {
   app.worker = new Worker(new URL('./dsp/analyze-worker.js', import.meta.url), { type: 'module' });
   app.worker.onmessage = handleWorkerMessage;
 
+  app.band = new LyricBand({
+    previous: dom.lyricPrev,
+    current: dom.lyricCurrent,
+    next: dom.lyricNext,
+    progress: dom.lyricProgress,
+  });
+  app.sheet = new LyricSheet(dom.lyricSheet, {
+    onSeek: (time) => seek(time),
+    onTap: (index) => stampLyricLine(index),
+  });
+
   app.ribbon = new Ribbon(dom.ribbon, {
     onSeek: (time) => seek(time),
     onLoop: ({ start, end }) => {
@@ -115,12 +153,13 @@ async function boot() {
   app.store.addEventListener('change', () => renderAll());
   app.store.addEventListener('mix', () => { syncEngineMix(); renderMixer(); });
   app.store.addEventListener('loop', () => renderRibbon());
-  app.store.addEventListener('selection', () => { renderStageHead(); renderMixer(); renderScorecard(); renderRibbon(); });
+  app.store.addEventListener('selection', () => { renderStageHead(); renderMixer(); renderScorecard(); renderRibbon(); renderLyrics(); });
   app.store.addEventListener('error', (event) => toast(event.detail.message, true));
 
   bindTransport();
   bindLibrary();
   bindStage();
+  bindLyrics();
   bindDialogs();
   bindKeyboard();
 
@@ -147,8 +186,15 @@ async function restoreLastProject() {
 }
 
 async function loadProject(project) {
+  // A new project starts at its own beginning; carrying the old playhead over
+  // would put the next take somewhere arbitrary in the new song.
+  app.engine.stop({ silent: true });
+  app.playhead = 0;
+  app.engine.startPosition = 0;
   app.buffers.clear();
+  app.refBuffers.clear();
   app.backingBuffer = null;
+  setTapMode(false);
   for (const trackId of [...app.engine.tracks.keys()]) app.engine.removeTrack(trackId);
 
   app.store.setProject(project);
@@ -164,6 +210,14 @@ async function loadProject(project) {
           .then((blob) => (blob ? blobToAudioBuffer(blob, app.engine.context) : null))
           .then((buffer) => { if (buffer) app.buffers.set(take.id, buffer); })
           .catch(() => { /* a missing take just cannot be played back */ }),
+      );
+    }
+    if (track.referenceAudio?.key) {
+      loads.push(
+        db.getAudio(track.referenceAudio.key)
+          .then((blob) => (blob ? blobToAudioBuffer(blob, app.engine.context) : null))
+          .then((buffer) => { if (buffer) app.refBuffers.set(track.referenceAudio.key, buffer); })
+          .catch(() => {}),
       );
     }
   }
@@ -225,18 +279,38 @@ function bindTransport() {
   };
 }
 
-function buildPlan({ excludeTrackId = null } = {}) {
+/**
+ * @param {object} opts
+ *   excludeTrackId — silence this part's own take (used while recording it).
+ *     Its guide reference still plays: hearing the part you are replacing is
+ *     the point of a guide.
+ *   guides — include guide references at all (off for the mix export, which
+ *     should contain your voices, not your references).
+ */
+function buildPlan({ excludeTrackId = null, guides = true } = {}) {
   const project = app.store.project;
   const plan = [];
   if (app.backingBuffer) plan.push({ trackId: BACKING_TRACK_ID, buffer: app.backingBuffer, startAt: project.backing?.startAt ?? 0 });
+
   for (const track of project.tracks) {
-    if (track.id === excludeTrackId) continue;
-    const take = activeTake(track);
-    if (!take) continue;
-    const buffer = app.buffers.get(take.id);
-    if (buffer) plan.push({ trackId: track.id, buffer, startAt: take.startAt ?? 0 });
+    if (track.id !== excludeTrackId) {
+      const take = activeTake(track);
+      const buffer = take && app.buffers.get(take.id);
+      if (buffer) plan.push({ trackId: track.id, buffer, startAt: take.startAt ?? 0 });
+    }
+    if (!guides || !track.guideEnabled) continue;
+    const guide = guideBuffer(track);
+    if (guide) plan.push({ trackId: guideTrackId(track.id), buffer: guide.buffer, startAt: guide.startAt });
   }
   return plan;
+}
+
+/** Resolve a part's guide to an actual buffer and timeline position. */
+function guideBuffer(track) {
+  const reference = referenceOf(track);
+  if (!reference) return null;
+  const buffer = reference.kind === 'audio' ? app.refBuffers.get(reference.key) : app.buffers.get(reference.takeId);
+  return buffer ? { buffer, startAt: reference.startAt } : null;
 }
 
 async function play({ from = app.playhead, countIn = false } = {}) {
@@ -279,6 +353,8 @@ function seek(time) {
     app.ribbon.setPosition(app.playhead);
     updateClock(app.playhead);
     updateTransportButtons();
+    app.band.update(app.playhead);
+    if (app.bottomTab === 'lyrics') app.sheet.update(app.playhead, { follow: false });
   }
 }
 
@@ -361,6 +437,8 @@ async function record() {
   app.recording = { trackId: track.id, startContextTime, from };
   app.ribbon.follow = true;
   updateTransportButtons();
+  // Words up while you sing; the score is only useful once the take is done.
+  if (currentLyrics().length && app.bottomTab !== 'lyrics') setBottomTab('lyrics');
 }
 
 async function finishRecording() {
@@ -412,6 +490,7 @@ async function finishRecording() {
   });
   app.store.selectTake(take.id);
   app.playhead = context.from;
+  setBottomTab('score');
   analyseTake(track.id, take.id);
 }
 
@@ -512,6 +591,8 @@ function startAnimationLoop() {
         app.playhead = Math.max(0, position);
         updateClock(position);
         app.ribbon.setPosition(app.playhead, { recording: Boolean(app.recording) });
+        app.band.update(app.playhead);
+        if (app.bottomTab === 'lyrics') app.sheet.update(app.playhead, { follow: !app.tapMode });
       }
 
       const analyser = app.input?.analyser;
@@ -791,6 +872,158 @@ function bindStage() {
   dom.targetBtn.addEventListener('click', () => openTargetDialog());
 }
 
+// ---------------------------------------------------------------------------
+// Lyrics
+// ---------------------------------------------------------------------------
+
+function bindLyrics() {
+  document.querySelectorAll('.btab').forEach((tab) => {
+    tab.addEventListener('click', () => setBottomTab(tab.dataset.btab));
+  });
+
+  dom.lyricsEditBtn.addEventListener('click', () => openLyricsDialog());
+  dom.lyricsTapBtn.addEventListener('click', () => setTapMode(!app.tapMode));
+  dom.lyricsNudgeBack.addEventListener('click', () => nudgeLyrics(-0.1));
+  dom.lyricsNudgeFwd.addEventListener('click', () => nudgeLyrics(0.1));
+
+  dom.lyricsImportBtn.addEventListener('click', () => dom.lyricsFile.click());
+  dom.lyricsFile.addEventListener('change', async () => {
+    const file = dom.lyricsFile.files?.[0];
+    if (!file) return;
+    dom.lyricsText.value = await file.text();
+    updateLyricsDialogStatus();
+    dom.lyricsFile.value = '';
+  });
+
+  dom.lyricsClearTimings.addEventListener('click', () => {
+    const { lines } = parseLyrics(dom.lyricsText.value);
+    dom.lyricsText.value = formatLyrics(clearTimings(lines));
+    updateLyricsDialogStatus();
+  });
+
+  dom.lyricsText.addEventListener('input', updateLyricsDialogStatus);
+
+  dom.lyricsDialog.addEventListener('close', () => {
+    if (dom.lyricsDialog.returnValue !== 'save') return;
+    const { lines, errors } = parseLyrics(dom.lyricsText.value);
+    if (errors.length) toast(errors[0], true);
+    const scope = dom.lyricsScope.value;
+    const trackId = app.store.selectedTrackId;
+    app.store.update((project) => {
+      if (scope === 'part') {
+        const track = project.tracks.find((t) => t.id === trackId);
+        if (track) track.lyrics = lines;
+      } else {
+        project.lyrics = lines;
+        // A part-level override would hide what was just saved for the song.
+        const track = project.tracks.find((t) => t.id === trackId);
+        if (track && !track.lyrics?.length) track.lyrics = null;
+      }
+    });
+    setBottomTab('lyrics');
+  });
+}
+
+function setBottomTab(name) {
+  app.bottomTab = name;
+  document.querySelectorAll('.btab').forEach((tab) => tab.classList.toggle('active', tab.dataset.btab === name));
+  dom.scorecard.hidden = name !== 'score';
+  dom.lyricSheet.hidden = name !== 'lyrics';
+  dom.lyricsActions.hidden = name !== 'lyrics';
+  if (name === 'lyrics') renderLyrics();
+  else if (app.tapMode) setTapMode(false);
+}
+
+function currentLyrics() {
+  const project = app.store.project;
+  if (!project) return [];
+  return lyricsFor(project, app.store.selectedTrack);
+}
+
+function renderLyrics() {
+  const lines = currentLyrics();
+  app.band.setLines(lines);
+  app.sheet.setLines(lines);
+  app.band.update(app.playhead);
+  app.sheet.update(app.playhead, { follow: false });
+  const track = app.store.selectedTrack;
+  const ownWords = Boolean(track?.lyrics?.length);
+  dom.lyricsStatus.textContent = `${lyricsSummary(lines)}${ownWords ? ` · ${track.name} only` : ''}`;
+  if (app.tapMode) app.sheet.markPending(nextUntimedIndex(lines));
+}
+
+function setTapMode(enabled) {
+  app.tapMode = enabled;
+  dom.lyricsTapBtn.classList.toggle('active', enabled);
+  dom.lyricsTapBtn.textContent = enabled ? 'Tapping — press T' : 'Tap to time';
+  app.sheet.setTapMode(enabled);
+  if (enabled) {
+    const pending = nextUntimedIndex(currentLyrics());
+    app.sheet.markPending(pending);
+    toast(pending === -1
+      ? 'Every line is timed. Clear the timings first if you want to redo them.'
+      : 'Play the track and press T (or click a line) as each line comes around.');
+  } else {
+    app.sheet.markPending(-1);
+  }
+}
+
+/** Stamp the pending line — or a clicked one — with the current position. */
+function stampLyricLine(index = null) {
+  const lines = currentLyrics();
+  if (!lines.length) return;
+  const target = index === null ? nextUntimedIndex(lines) : index;
+  if (target < 0) {
+    toast('Every line already has a time.');
+    setTapMode(false);
+    return;
+  }
+  const stamped = stampLine(lines, target, app.playhead);
+  writeLyrics(stamped);
+  const remaining = nextUntimedIndex(stamped);
+  app.sheet.markPending(remaining);
+  if (remaining === -1) {
+    setTapMode(false);
+    toast('All lines timed.');
+  }
+}
+
+function nudgeLyrics(seconds) {
+  const lines = currentLyrics();
+  if (!lines.length) return;
+  writeLyrics(shiftLyrics(lines, seconds));
+  toast(`Lyrics shifted ${seconds > 0 ? '+' : ''}${Math.round(seconds * 1000)} ms.`);
+}
+
+/** Write back to whichever scope the current words came from. */
+function writeLyrics(lines) {
+  const trackId = app.store.selectedTrackId;
+  const usesOwn = Boolean(app.store.selectedTrack?.lyrics?.length);
+  app.store.update((project) => {
+    if (usesOwn) {
+      const track = project.tracks.find((t) => t.id === trackId);
+      if (track) track.lyrics = lines;
+    } else {
+      project.lyrics = lines;
+    }
+  });
+}
+
+function openLyricsDialog() {
+  const track = app.store.selectedTrack;
+  const usesOwn = Boolean(track?.lyrics?.length);
+  dom.lyricsScope.value = usesOwn ? 'part' : 'song';
+  dom.lyricsDialogScope.textContent = usesOwn ? track.name : (app.store.project?.title ?? 'song');
+  dom.lyricsText.value = formatLyrics(currentLyrics());
+  updateLyricsDialogStatus();
+  dom.lyricsDialog.showModal();
+}
+
+function updateLyricsDialogStatus() {
+  const { lines, errors } = parseLyrics(dom.lyricsText.value);
+  dom.lyricsDialogStatus.textContent = errors.length ? errors[0] : lyricsSummary(lines);
+}
+
 function renderStageHead() {
   const project = app.store.project;
   const track = app.store.selectedTrack;
@@ -978,7 +1211,8 @@ function detectOnsets(samples, sampleRate, count, expected) {
 
 async function exportMix() {
   const project = app.store.project;
-  const plan = buildPlan();
+  // Guides are references you sang against, not part of the finished stack.
+  const plan = buildPlan({ guides: false });
   if (!plan.length) {
     toast('Nothing to export yet — record a part first.', true);
     return;
@@ -1125,9 +1359,72 @@ function trackStrip(track) {
     app.store.updateTrack(track.id, (current) => {
       current.takes = current.takes.filter((item) => item.id !== takeId);
       current.activeTakeId = current.takes[current.takes.length - 1]?.id ?? null;
+      if (current.referenceTakeId === takeId) {
+        current.referenceTakeId = null;
+        current.guideEnabled = false;
+      }
     });
   });
   takes.append(select, deleteTake);
+
+  // Reference / guide row: what this part sounds like, on the timeline, while
+  // you sing it.
+  const reference = referenceOf(track);
+  const ref = document.createElement('div');
+  ref.className = 'strip-ref';
+  ref.append(
+    miniButton('Ref', 'guide', track.guideEnabled, () => {
+      app.store.updateTrack(track.id, (current) => { current.guideEnabled = !current.guideEnabled; }, { type: 'mix' });
+      if (app.engine.playing) restartTransport();
+    }),
+    miniButton('Set★', 'setref', false, () => {
+      const takeId = track.activeTakeId;
+      if (!takeId) {
+        toast('Record or select a take on this part first.', true);
+        return;
+      }
+      app.store.updateTrack(track.id, (current) => {
+        current.referenceTakeId = takeId;
+        current.referenceAudio = null;
+        current.guideEnabled = true;
+      }, { type: 'mix' });
+      toast(`${track.name}: that take is now the reference. It plays while you record this part.`);
+    }),
+    miniButton('Load…', 'loadref', false, () => importPartReference(track.id)),
+  );
+  const refLevel = document.createElement('input');
+  refLevel.type = 'range';
+  refLevel.min = '0';
+  refLevel.max = '1.4';
+  refLevel.step = '0.01';
+  refLevel.value = String(track.guideLevel);
+  refLevel.title = 'Reference level — keep it under your own voice';
+  refLevel.addEventListener('input', () => {
+    const value = Number(refLevel.value);
+    app.store.updateTrack(track.id, (current) => { current.guideLevel = value; }, { type: 'mix', silent: true });
+    app.engine.setTrackMix(guideTrackId(track.id), { level: value });
+  });
+  ref.appendChild(refLevel);
+
+  const refName = document.createElement('div');
+  refName.className = `strip-ref-name${reference ? ' set' : ''}`;
+  refName.textContent = reference ? `Ref: ${reference.name}` : 'No reference set';
+  if (reference) {
+    const clear = document.createElement('button');
+    clear.className = 'mini';
+    clear.textContent = '✕';
+    clear.title = 'Clear this reference';
+    clear.style.marginLeft = '6px';
+    clear.addEventListener('click', (event) => {
+      event.stopPropagation();
+      app.store.updateTrack(track.id, (current) => {
+        current.referenceTakeId = null;
+        current.referenceAudio = null;
+        current.guideEnabled = false;
+      }, { type: 'mix' });
+    });
+    refName.appendChild(clear);
+  }
 
   const meta = document.createElement('div');
   meta.className = 'strip-meta';
@@ -1141,7 +1438,7 @@ function trackStrip(track) {
     meta.appendChild(span);
   }
 
-  strip.append(head, buttons, level, pan, takes, meta);
+  strip.append(head, buttons, level, pan, takes, ref, refName, meta);
   strip.addEventListener('click', (event) => {
     if (event.target.closest('button, select, input')) return;
     app.store.selectTrack(track.id);
@@ -1211,11 +1508,49 @@ function sliderRow(label, value, min, max, step, onInput) {
   return row;
 }
 
+/** Import an isolated stem or any audio file as this part's reference. */
+async function importPartReference(trackId) {
+  dom.partRefFile.value = '';
+  dom.partRefFile.onchange = async () => {
+    const file = dom.partRefFile.files?.[0];
+    if (!file) return;
+    try {
+      const buffer = await blobToAudioBuffer(file, app.engine.context);
+      const key = `ref-${uid()}`;
+      await db.putAudio(key, file);
+      app.refBuffers.set(key, buffer);
+      app.store.updateTrack(trackId, (current) => {
+        current.referenceAudio = { key, name: file.name, duration: buffer.duration, startAt: 0 };
+        current.referenceTakeId = null;
+        current.guideEnabled = true;
+      }, { type: 'mix' });
+      toast(`Reference loaded for that part (${formatTime(buffer.duration)}). It starts at 0:00 — use the section anchor if it needs shifting.`);
+    } catch (error) {
+      toast(`Could not decode that audio file: ${error.message}`, true);
+    }
+  };
+  dom.partRefFile.click();
+}
+
+/** Re-run the transport from the current spot so a mix change takes effect now. */
+function restartTransport() {
+  if (!app.engine.playing || app.recording) return;
+  play({ from: app.playhead });
+}
+
 function syncEngineMix() {
   const project = app.store.project;
   if (!project) return;
   for (const track of project.tracks) {
     app.engine.setTrackMix(track.id, { level: track.level, pan: track.pan, mute: track.mute, solo: track.solo });
+    // A guide inherits its part's mute and solo, so soloing the part you are
+    // learning leaves its reference audible and silences everyone else's.
+    app.engine.setTrackMix(guideTrackId(track.id), {
+      level: track.guideLevel ?? 0.55,
+      pan: 0,
+      mute: track.mute,
+      solo: track.solo,
+    });
   }
   if (project.backing) app.engine.ensureTrack(BACKING_TRACK_ID);
   app.engine.setMasterLevel(project.masterLevel ?? 0.9);
@@ -1344,6 +1679,7 @@ function renderAll() {
   renderMixer();
   renderScorecard();
   renderRibbon();
+  renderLyrics();
   renderLibrary();
 }
 
@@ -1370,6 +1706,11 @@ function bindKeyboard() {
       app.recording ? stop() : record();
     } else if (event.key === 'Home') {
       seek(0);
+    } else if (event.key.toLowerCase() === 't') {
+      if (app.tapMode) {
+        event.preventDefault();
+        stampLyricLine();
+      }
     } else if (event.key.toLowerCase() === 'l') {
       setLoopEnabled(!app.store.project.loopEnabled);
     } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {

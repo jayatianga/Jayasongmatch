@@ -35,6 +35,10 @@ function baseProject(source) {
     loop: source.loop ?? null,
     loopEnabled: false,
     backing: null,
+    // Words for the whole song. A part can override these with its own; see
+    // lyricsFor(). Nothing ships pre-filled — you supply the words.
+    lyrics: [],
+    lyricOffset: 0,
     sections: [],
     tracks: [],
     createdAt: Date.now(),
@@ -86,8 +90,38 @@ function makeTrack(partDefinition, index) {
     targetSource: 'none',
     takes: [],
     activeTakeId: null,
+    // Reference ("guide") playback for this part: a take you already sang, or
+    // an imported stem. It plays at its own level, in time, and — unlike the
+    // part's active take — it keeps playing while you record this same part.
+    referenceTakeId: null,
+    referenceAudio: null,   // {key, name, duration, startAt}
+    guideEnabled: false,
+    guideLevel: 0.55,
+    lyrics: null,           // null = use the song lyrics
   };
 }
+
+/** The words this part sings: its own if it has any, otherwise the song's. */
+export function lyricsFor(project, track) {
+  if (track?.lyrics?.length) return track.lyrics;
+  return project?.lyrics ?? [];
+}
+
+/** Resolve a part's reference source, if it has one. */
+export function referenceOf(track) {
+  if (!track) return null;
+  if (track.referenceAudio?.key) {
+    return { kind: 'audio', key: track.referenceAudio.key, startAt: track.referenceAudio.startAt ?? 0, name: track.referenceAudio.name };
+  }
+  if (track.referenceTakeId) {
+    const take = track.takes.find((item) => item.id === track.referenceTakeId);
+    if (take) return { kind: 'take', takeId: take.id, startAt: take.startAt ?? 0, name: take.name };
+  }
+  return null;
+}
+
+/** Engine track id for a part's guide, so it gets its own independent fader. */
+export const guideTrackId = (trackId) => `guide:${trackId}`;
 
 export function totalBars(project) {
   return project.sections.reduce((sum, section) => sum + section.bars, 0);
