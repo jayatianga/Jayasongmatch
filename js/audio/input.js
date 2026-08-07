@@ -58,16 +58,30 @@ export class InputChain {
    */
   async open({ deviceId, channel = 0 } = {}) {
     await this.close();
-    const constraints = {
-      audio: {
-        deviceId: deviceId ? { exact: deviceId } : undefined,
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-        channelCount: { ideal: 2 },
-      },
-    };
-    this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+    // Preferred: an exact device, untouched by voice processing. If the
+    // platform refuses that combination — iOS rejects an exact deviceId it did
+    // not offer, and some devices refuse a stereo request — fall back rather
+    // than leaving the singer with no microphone at all.
+    const processing = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+    const attempts = [
+      { audio: { deviceId: deviceId ? { exact: deviceId } : undefined, ...processing, channelCount: { ideal: 2 } } },
+      { audio: { deviceId: deviceId ? { ideal: deviceId } : undefined, ...processing } },
+      { audio: processing },
+      { audio: true },
+    ];
+
+    let lastError = null;
+    for (const constraints of attempts) {
+      try {
+        this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+        break;
+      } catch (error) {
+        lastError = error;
+        // A refusal is the user's decision, not a constraint problem.
+        if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') throw error;
+      }
+    }
+    if (!this.stream) throw lastError ?? new Error('No microphone available.');
     const track = this.stream.getAudioTracks()[0];
     const settings = track.getSettings?.() ?? {};
     this.deviceId = settings.deviceId ?? deviceId ?? null;

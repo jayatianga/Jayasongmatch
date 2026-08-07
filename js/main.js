@@ -16,6 +16,7 @@ import { buildAttempt, formatReportText } from './trainer/attempt.js';
 import { coachReport, songReadiness } from './trainer/coach.js';
 import { BASELINE_ID, baselineProgress, isBaselineProject, rangeFromSweeps, stageFor } from './trainer/baseline.js';
 import { drawRangeMap, drawHistory, renderSkills, renderCoach, renderReadiness, renderHistory, renderReport } from './ui/trainer.js';
+import { isIOS, isTouch, isStandalone, capabilities, canChooseInputDevice, requestPersistentStorage, ScreenLock, platformNotes } from './platform.js';
 import { parseTargets, formatTargets, targetsSummary, rangeWarning, shiftTargets } from './ui/noteeditor.js';
 import { midiToName, midiToHz, hzToMidi, centsFrom } from './dsp/notes.js';
 import { yin, rms } from './dsp/yin.js';
@@ -127,6 +128,12 @@ const dom = {
   reportDialog: el('report-dialog'),
   reportBody: el('report-body'),
   reportExport: el('report-export'),
+  mobileNav: el('mobile-nav'),
+  setupBanner: el('setup-banner'),
+  setupTitle: el('setup-title'),
+  setupDetail: el('setup-detail'),
+  setupDismiss: el('setup-dismiss'),
+  inputGroup: document.querySelector('.input-group'),
 };
 
 const app = {
@@ -149,9 +156,11 @@ const app = {
   sheet: null,
   tapMode: false,
   view: 'studio',
+  panel: 'stage',        // which column is showing on a phone
   attempts: [],          // every analysed take, newest first
   baselineRange: null,   // range measured by the baseline sweeps
   reportAttempt: null,
+  screenLock: new ScreenLock(),
 };
 
 // ---------------------------------------------------------------------------
@@ -198,6 +207,7 @@ async function boot() {
   bindStage();
   bindLyrics();
   bindTrainer();
+  bindPlatform();
   bindDialogs();
   bindKeyboard();
 
@@ -474,6 +484,7 @@ async function record() {
   });
 
   app.recording = { trackId: track.id, startContextTime, from };
+  app.screenLock.acquire();
   app.ribbon.follow = true;
   updateTransportButtons();
   // Words up while you sing; the score is only useful once the take is done.
@@ -485,6 +496,7 @@ async function finishRecording() {
   if (!context) return;
   app.recording = null;
   app.engine.stop({ silent: true });
+  app.screenLock.release();
   updateTransportButtons();
 
   const { samples, startContextTime, sampleRate } = await app.input.stopCapture();
@@ -918,6 +930,105 @@ function bindStage() {
 }
 
 // ---------------------------------------------------------------------------
+// Platform: touch layout, iOS quirks, install, offline
+// ---------------------------------------------------------------------------
+
+function bindPlatform() {
+  document.body.dataset.view = 'studio';
+  document.body.dataset.panel = app.panel;
+  document.body.classList.toggle('ios', isIOS);
+  document.body.classList.toggle('touch', isTouch);
+
+  dom.mobileNav.querySelectorAll('button').forEach((button) => {
+    button.addEventListener('click', () => setPanel(button.dataset.panel));
+  });
+  dom.setupDismiss.addEventListener('click', () => { dom.setupBanner.hidden = true; });
+
+  // iOS hands the page one microphone and ignores requests for a different
+  // one, so controls that cannot do anything are removed rather than left to
+  // disappoint.
+  if (!canChooseInputDevice()) {
+    dom.deviceSelect.hidden = true;
+    dom.channelSelect.hidden = true;
+    dom.refreshDevices.hidden = true;
+    dom.inputGroup?.querySelectorAll('.field').forEach((field) => { field.hidden = true; });
+  }
+
+  // Any first touch is a good moment to unlock audio: iOS keeps the context
+  // suspended until a gesture, and a suspended context records silence.
+  const unlock = () => {
+    app.engine.resume().catch(() => {});
+  };
+  document.addEventListener('pointerdown', unlock, { once: true });
+  document.addEventListener('touchend', unlock, { once: true });
+
+  app.engine.watchForInterruptions();
+  app.engine.onInterrupted = () => {
+    if (app.recording) {
+      app.recording = null;
+      updateTransportButtons();
+      toast('Recording stopped: another app took the audio. Check the take before keeping it.', true);
+    } else {
+      toast('Playback stopped — the system took the audio session. Tap play to resume.', true);
+    }
+    app.screenLock.release();
+  };
+
+  // Coming back from the background with a suspended context looks like a
+  // broken app otherwise.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') app.engine.resume().catch(() => {});
+  });
+
+  reportCapabilities();
+  registerServiceWorker();
+  requestPersistentStorage().then(({ supported, persisted }) => {
+    if (supported && !persisted && isIOS) {
+      console.info('Storage is not persisted; iOS may clear recordings after a week of not opening the app.');
+    }
+  });
+}
+
+/** One panel at a time on a phone. */
+function setPanel(panel) {
+  app.panel = panel;
+  document.body.dataset.panel = panel;
+  dom.mobileNav.querySelectorAll('button').forEach((button) => {
+    button.classList.toggle('active', button.dataset.panel === panel);
+  });
+  if (panel === 'stage') requestAnimationFrame(() => app.ribbon.resize());
+}
+
+/** Say plainly when the platform cannot do something, and what to do about it. */
+function reportCapabilities() {
+  const { blocked, degraded } = capabilities();
+  if (blocked.length) {
+    const first = blocked[0];
+    dom.setupTitle.textContent = `${first.label} unavailable`;
+    dom.setupDetail.textContent = first.detail;
+    dom.setupBanner.hidden = false;
+    for (const button of [dom.recordBtn, dom.monitorBtn]) button.disabled = true;
+    return;
+  }
+  if (degraded.length) {
+    console.info('Running with reduced capability:', degraded.map((check) => check.label).join(', '));
+  }
+  const notes = platformNotes();
+  if (notes.length && !isStandalone) toast(notes[0]);
+}
+
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  try {
+    // sw.js sits beside index.html, so resolve against the document rather
+    // than this module, which lives a directory down.
+    await navigator.serviceWorker.register(new URL('sw.js', document.baseURI), { scope: './' });
+  } catch {
+    // Offline support is a bonus; the app works without it.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Trainer: progress database, profile, coach and the baseline test
 // ---------------------------------------------------------------------------
 
@@ -973,6 +1084,7 @@ function bindTrainer() {
 
 function setView(view) {
   app.view = view;
+  document.body.dataset.view = view;
   document.querySelectorAll('.vtab').forEach((tab) => tab.classList.toggle('active', tab.dataset.view === view));
   dom.studioMain.hidden = view !== 'studio';
   dom.trainerMain.hidden = view !== 'trainer';

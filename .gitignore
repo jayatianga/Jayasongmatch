@@ -3,3 +3,4 @@ package-lock.json
 *.wav
 .DS_Store
 __pycache__/
+.certs/

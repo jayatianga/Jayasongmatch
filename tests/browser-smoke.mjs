@@ -47,8 +47,10 @@ await page.addInitScript(() => {
   };
 });
 
-await page.goto(BASE_URL, { waitUntil: 'networkidle' });
-await page.waitForTimeout(1200);
+// Not `networkidle`: the service worker keeps caching the app shell in the
+// background, so the network never goes quiet on a first load.
+await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(2500);
 
 // The default project is a drill, so parts and targets exist immediately.
 assert.ok((await page.textContent('#project-name')).length > 3, 'a project should load on startup');

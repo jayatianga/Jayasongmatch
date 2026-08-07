@@ -402,41 +402,93 @@ export class Ribbon {
   }
 
   // --- interaction --------------------------------------------------------
+  /**
+   * One set of handlers for mouse and touch. A tap seeks, a drag pans, two
+   * fingers pinch to zoom, and shift-drag (mouse only, since it needs a
+   * keyboard) sets the loop region. Touch users set loops from the section
+   * menu instead.
+   */
   _bindPointer() {
     const canvas = this.canvas;
+    const pointers = new Map();
+    const TAP_SLOP = 9; // pixels of movement still counted as a tap
+
+    const localX = (event) => event.clientX - canvas.getBoundingClientRect().left;
+
     canvas.addEventListener('pointerdown', (event) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const time = Math.max(0, this.xToTime(x));
-      if (event.shiftKey) {
-        this._dragging = { mode: 'loop', from: time };
-        canvas.setPointerCapture(event.pointerId);
-      } else {
-        this.follow = false;
-        this.onSeek?.(time);
+      canvas.setPointerCapture?.(event.pointerId);
+      pointers.set(event.pointerId, { x: event.clientX });
+
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        const rect = canvas.getBoundingClientRect();
+        this._gesture = {
+          mode: 'pinch',
+          startSpread: Math.max(1, Math.abs(a.x - b.x)),
+          startDuration: this.view.duration,
+          anchorTime: this.xToTime((a.x + b.x) / 2 - rect.left),
+        };
+        return;
       }
+
+      if (event.shiftKey && event.pointerType !== 'touch') {
+        this._gesture = { mode: 'loop', from: Math.max(0, this.xToTime(localX(event))) };
+        return;
+      }
+      this._gesture = { mode: 'tap', time: Math.max(0, this.xToTime(localX(event))), travelled: 0 };
     });
 
     canvas.addEventListener('pointermove', (event) => {
-      if (!this._dragging) return;
-      const rect = canvas.getBoundingClientRect();
-      const time = Math.max(0, this.xToTime(event.clientX - rect.left));
-      if (this._dragging.mode === 'loop') {
-        const start = Math.min(this._dragging.from, time);
-        const end = Math.max(this._dragging.from, time);
+      const pointer = pointers.get(event.pointerId);
+      if (!pointer || !this._gesture) return;
+      const dx = event.clientX - pointer.x;
+      pointer.x = event.clientX;
+
+      if (this._gesture.mode === 'pinch') {
+        if (pointers.size < 2) return;
+        const [a, b] = [...pointers.values()];
+        const spread = Math.max(1, Math.abs(a.x - b.x));
+        const duration = Math.max(1, Math.min(600, this._gesture.startDuration * (this._gesture.startSpread / spread)));
+        const rect = canvas.getBoundingClientRect();
+        const fraction = ((a.x + b.x) / 2 - rect.left - KEYS_WIDTH) / Math.max(1, this.width - KEYS_WIDTH);
+        this.follow = false;
+        this.setView(this._gesture.anchorTime - fraction * duration, duration);
+        return;
+      }
+
+      if (this._gesture.mode === 'loop') {
+        const time = Math.max(0, this.xToTime(localX(event)));
+        const start = Math.min(this._gesture.from, time);
+        const end = Math.max(this._gesture.from, time);
         if (end - start > 0.2) this.onLoop?.({ start, end });
+        return;
+      }
+
+      this._gesture.travelled += Math.abs(dx);
+      if (this._gesture.mode === 'tap' && this._gesture.travelled > TAP_SLOP) this._gesture.mode = 'pan';
+      if (this._gesture.mode === 'pan') {
+        this.follow = false;
+        const secondsPerPixel = this.view.duration / Math.max(1, this.width - KEYS_WIDTH);
+        this.setView(this.view.start - dx * secondsPerPixel, this.view.duration);
       }
     });
 
-    canvas.addEventListener('pointerup', (event) => {
-      this._dragging = null;
+    const release = (event) => {
+      pointers.delete(event.pointerId);
       canvas.releasePointerCapture?.(event.pointerId);
-    });
+      // A tap only seeks if the finger stayed put.
+      if (this._gesture?.mode === 'tap') {
+        this.follow = false;
+        this.onSeek?.(this._gesture.time);
+      }
+      if (pointers.size === 0 || this._gesture?.mode === 'pinch') this._gesture = null;
+    };
+    canvas.addEventListener('pointerup', release);
+    canvas.addEventListener('pointercancel', release);
 
     canvas.addEventListener('wheel', (event) => {
       event.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      const time = this.xToTime(event.clientX - rect.left);
+      const time = this.xToTime(localX(event));
       if (event.ctrlKey || event.metaKey) {
         this.zoom(event.deltaY > 0 ? 1.15 : 0.87, time);
       } else {

@@ -24,6 +24,18 @@ To stop, close the terminal window or press Ctrl+C in it.
 
 > On a Mac or Linux box, run `python3 serve.py` instead. The app itself is the same.
 
+### On an iPhone or iPad
+
+Start the server with `python serve.py --https`, trust its certificate on the
+device once, then open the network address it prints. Full instructions, and
+what differs on iOS, are in **[docs/ios.md](docs/ios.md)**.
+
+Two things genuinely cannot work there: iOS chooses the microphone itself, so
+there is no input or channel selector, and there is no loopback device, so
+backing tracks have to be imported as files. Everything else — recording,
+calibration, lyrics, references, the mixer and the whole Trainer — works, and
+the app can be added to the Home Screen to run full-screen and offline.
+
 ### First five minutes
 
 The app opens on a built-in drill with target notes already set, so you can
@@ -316,6 +328,21 @@ that attempt rather than logging a second one. You only sang it once.
 
 ---
 
+## Platforms
+
+| | Windows / macOS / Linux | iPhone / iPad |
+|---|---|---|
+| Recording, scoring, Trainer | yes | yes |
+| Choose input device and channel | yes | no — iOS picks the device |
+| Loopback capture (Stereo Mix and similar) | yes | no — import files instead |
+| Install to Home Screen, works offline | — | yes |
+| Needs | a browser | iOS 15.4+, and HTTPS via `--https` |
+
+The app checks what the platform supports when it starts and says plainly which
+piece is missing, rather than failing part-way through a take.
+
+---
+
 ## Windows input notes
 
 The **Input** dropdown lists every Windows capture endpoint, so you can use:
@@ -351,7 +378,8 @@ back and will also pollute your recording; use headphones.
 | `↑` / `↓` | Select the previous / next part |
 
 On the ribbon: click to seek, shift-drag to set a loop region, ctrl-wheel to
-zoom, wheel to scroll.
+zoom, wheel to scroll. With a touch screen: tap to seek, drag to scroll, pinch
+to zoom, and set loops from the section menu.
 
 ---
 
@@ -405,5 +433,7 @@ js/score.js  accuracy scoring
 js/ui/       pitch ribbon canvas, lyric band and sheet, trainer views
 js/data/     song structures, built-in drills, LRC lyric timing
 js/trainer/  skill model, baseline test, coach, attempt records
+js/platform.js  capability checks and the iOS differences
+sw.js        offline caching for the installed app
 js/state.js  project model and persistence
 ```

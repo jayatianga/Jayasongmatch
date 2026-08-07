@@ -4,9 +4,28 @@
 
 const LOOKAHEAD = 0.12; // seconds of scheduling headroom before playback starts
 
+/**
+ * Create the AudioContext without fighting the hardware. Forcing 48 kHz throws
+ * on some iOS devices and silently resamples on others; asking for the
+ * device's own rate avoids both. Everything downstream reads
+ * `context.sampleRate` rather than assuming a value.
+ */
+function createContext() {
+  try {
+    return new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
+  } catch {
+    try {
+      return new AudioContext({ latencyHint: 'interactive' });
+    } catch {
+      return new AudioContext();
+    }
+  }
+}
+
 export class Engine {
   constructor() {
-    this.context = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
+    this.context = createContext();
+    this.onInterrupted = null;
     this.master = this.context.createGain();
     this.master.gain.value = 0.9;
     this.master.connect(this.context.destination);
@@ -29,6 +48,22 @@ export class Engine {
 
   async resume() {
     if (this.context.state !== 'running') await this.context.resume();
+    return this.context.state === 'running';
+  }
+
+  /**
+   * iOS takes the audio session away for a phone call, Siri, or another app,
+   * and hands back a suspended context. Anything mid-flight is lost, so the
+   * transport is stopped and the caller told, rather than leaving a take that
+   * silently recorded nothing.
+   */
+  watchForInterruptions() {
+    this.context.addEventListener('statechange', () => {
+      if (this.context.state === 'running') return;
+      const wasPlaying = this.playing;
+      this.stop({ silent: true });
+      if (wasPlaying) this.onInterrupted?.(this.context.state);
+    });
   }
 
   /** Round-trip delay we can account for without asking the user to calibrate. */

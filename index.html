@@ -2,10 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Jayasongmatch — harmony part recorder</title>
 <link rel="stylesheet" href="css/app.css" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎙️</text></svg>" />
+
+<!-- Home Screen install on iOS and Android -->
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="assets/icon-180.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Songmatch" />
+<meta name="theme-color" content="#12151c" />
 </head>
 <body>
 
@@ -326,6 +335,20 @@
     </menu>
   </form>
 </dialog>
+
+<nav class="mobile-nav" id="mobile-nav">
+  <button data-panel="library">Library</button>
+  <button data-panel="stage" class="active">Record</button>
+  <button data-panel="mixer">Parts</button>
+</nav>
+
+<div id="setup-banner" class="setup-banner" hidden>
+  <div class="setup-body">
+    <strong id="setup-title"></strong>
+    <div id="setup-detail"></div>
+  </div>
+  <button id="setup-dismiss" class="small-btn">Dismiss</button>
+</div>
 
 <div id="toast" class="toast" hidden></div>
 
