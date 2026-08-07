@@ -7,16 +7,6 @@
 <link rel="stylesheet" href="css/app.css" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎙️</text></svg>" />
 
-<!-- build:ios -->
-<!-- Home Screen install on iOS and Android -->
-<link rel="manifest" href="manifest.json" />
-<link rel="apple-touch-icon" href="assets/icon-180.png" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="apple-mobile-web-app-title" content="Songmatch" />
-<meta name="theme-color" content="#12151c" />
-<!-- /build:ios -->
 </head>
 <body>
 
@@ -35,7 +25,6 @@
   </div>
 
   <div class="group input-group">
-    <!-- build:windows -->
     <label class="field">
       <span>Input</span>
       <select id="device-select" title="Any Windows capture device: interface input, USB mic, or a loopback such as Stereo Mix"></select>
@@ -45,7 +34,6 @@
       <select id="channel-select" title="Which channel of a multi-channel interface to record"></select>
     </label>
     <button id="refresh-devices" class="icon-btn" title="Rescan Windows input devices">⟳</button>
-    <!-- /build:windows -->
     <div class="meter" title="Input level"><div class="meter-fill" id="input-meter"></div></div>
     <button id="monitor-btn" class="toggle" title="Hear yourself through the app (use headphones)">Monitor</button>
   </div>
