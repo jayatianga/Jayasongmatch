@@ -11,6 +11,11 @@ import { EXERCISES } from './data/exercises.js';
 import { parseLyrics, formatLyrics, lyricsSummary, clearTimings, shiftLyrics, stampLine, nextUntimedIndex, activeLineIndex } from './data/lyrics.js';
 import { LyricBand, LyricSheet } from './ui/lyrics.js';
 import { Ribbon, colorForCents } from './ui/ribbon.js';
+import { aggregateSkills, aggregateRange, rangeSummary, scoreHistory } from './trainer/profile.js';
+import { buildAttempt, formatReportText } from './trainer/attempt.js';
+import { coachReport, songReadiness } from './trainer/coach.js';
+import { BASELINE_ID, baselineProgress, isBaselineProject, rangeFromSweeps, stageFor } from './trainer/baseline.js';
+import { drawRangeMap, drawHistory, renderSkills, renderCoach, renderReadiness, renderHistory, renderReport } from './ui/trainer.js';
 import { parseTargets, formatTargets, targetsSummary, rangeWarning, shiftTargets } from './ui/noteeditor.js';
 import { midiToName, midiToHz, hzToMidi, centsFrom } from './dsp/notes.js';
 import { yin, rms } from './dsp/yin.js';
@@ -94,6 +99,34 @@ const dom = {
   lyricsFile: el('lyrics-file'),
   lyricsClearTimings: el('lyrics-clear-timings'),
   partRefFile: el('part-ref-file'),
+  studioMain: document.querySelector('main:not(.trainer-main)'),
+  trainerMain: el('trainer-main'),
+  trainerLevel: el('trainer-level'),
+  trainerHeadline: el('trainer-headline'),
+  trainerRangeSummary: el('trainer-range-summary'),
+  rangeMap: el('range-map'),
+  rangeFacts: el('range-facts'),
+  skillList: el('skill-list'),
+  coachPanel: el('coach-panel'),
+  readinessPanel: el('readiness-panel'),
+  readinessProject: el('readiness-project'),
+  historyChart: el('history-chart'),
+  historyList: el('history-list'),
+  clearHistoryBtn: el('clear-history-btn'),
+  baselineStartBtn: el('baseline-start-btn'),
+  baselineResumeBtn: el('baseline-resume-btn'),
+  exportProgressBtn: el('export-progress-btn'),
+  baselineBanner: el('baseline-banner'),
+  baselineStageName: el('baseline-stage-name'),
+  baselineStageCount: el('baseline-stage-count'),
+  baselineInstruction: el('baseline-instruction'),
+  baselineRecordBtn: el('baseline-record-btn'),
+  baselineSkipBtn: el('baseline-skip-btn'),
+  baselineFinishBtn: el('baseline-finish-btn'),
+  baselineExitBtn: el('baseline-exit-btn'),
+  reportDialog: el('report-dialog'),
+  reportBody: el('report-body'),
+  reportExport: el('report-export'),
 };
 
 const app = {
@@ -115,6 +148,10 @@ const app = {
   band: null,
   sheet: null,
   tapMode: false,
+  view: 'studio',
+  attempts: [],          // every analysed take, newest first
+  baselineRange: null,   // range measured by the baseline sweeps
+  reportAttempt: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -160,9 +197,11 @@ async function boot() {
   bindLibrary();
   bindStage();
   bindLyrics();
+  bindTrainer();
   bindDialogs();
   bindKeyboard();
 
+  await loadAttempts();
   await restoreLastProject();
   await refreshDevices({ prompt: false });
   startAnimationLoop();
@@ -498,7 +537,7 @@ async function finishRecording() {
 // Analysis
 // ---------------------------------------------------------------------------
 
-function analyseTake(trackId, takeId, { deriveNotes = false } = {}) {
+function analyseTake(trackId, takeId, { deriveNotes = false, rescore = false } = {}) {
   const project = app.store.project;
   const track = project.tracks.find((t) => t.id === trackId);
   const take = track?.takes.find((t) => t.id === takeId);
@@ -506,7 +545,7 @@ function analyseTake(trackId, takeId, { deriveNotes = false } = {}) {
   if (!track || !take || !buffer) return;
 
   const id = ++app.analysisSeq;
-  app.pendingAnalyses.set(id, { trackId, takeId, deriveNotes });
+  app.pendingAnalyses.set(id, { trackId, takeId, deriveNotes, rescore });
   take.analyzing = true;
   renderScorecard();
 
@@ -565,14 +604,20 @@ function handleWorkerMessage(event) {
   if (pending.deriveNotes) {
     toast('Targets set from that take. Re-scoring the other takes of this part…');
     rescoreTrack(pending.trackId);
+    return;
   }
+
+  // A freshly scored take becomes a permanent progress record. Re-scores of an
+  // existing take (after a target or setting change) update in place instead of
+  // stacking up duplicate attempts.
+  if (event.data.score) recordAttempt(pending.trackId, pending.takeId, { rescore: pending.rescore });
 }
 
 function rescoreTrack(trackId) {
   const track = app.store.project.tracks.find((t) => t.id === trackId);
   if (!track) return;
   for (const take of track.takes) {
-    if (app.buffers.has(take.id)) analyseTake(trackId, take.id);
+    if (app.buffers.has(take.id)) analyseTake(trackId, take.id, { rescore: true });
   }
 }
 
@@ -870,6 +915,282 @@ function bindStage() {
   });
 
   dom.targetBtn.addEventListener('click', () => openTargetDialog());
+}
+
+// ---------------------------------------------------------------------------
+// Trainer: progress database, profile, coach and the baseline test
+// ---------------------------------------------------------------------------
+
+function bindTrainer() {
+  document.querySelectorAll('.vtab').forEach((tab) => {
+    tab.addEventListener('click', () => setView(tab.dataset.view));
+  });
+
+  dom.baselineStartBtn.addEventListener('click', () => startBaseline({ fresh: true }));
+  dom.baselineResumeBtn.addEventListener('click', () => startBaseline({ fresh: false }));
+  dom.exportProgressBtn.addEventListener('click', exportProgress);
+  dom.clearHistoryBtn.addEventListener('click', async () => {
+    if (!confirm('Delete every attempt record? Your recordings stay, but all progress history and skill measurements are lost.')) return;
+    await db.clearAttempts();
+    await db.setTrainer('baselineRange', null);
+    app.attempts = [];
+    app.baselineRange = null;
+    renderTrainer();
+    toast('Progress history cleared.');
+  });
+
+  dom.baselineRecordBtn.addEventListener('click', () => {
+    const state = baselineProgress(app.store.project, app.attempts);
+    const stage = state.next ?? state.stages[0];
+    if (!stage?.trackId) return;
+    app.store.armTrack(stage.trackId);
+    app.store.selectTrack(stage.trackId);
+    seek(0);
+    record();
+  });
+  dom.baselineSkipBtn.addEventListener('click', () => {
+    const state = baselineProgress(app.store.project, app.attempts);
+    const index = state.stages.findIndex((stage) => !stage.complete);
+    const nextStage = state.stages.slice(index + 1).find((stage) => !stage.complete);
+    if (nextStage?.trackId) {
+      app.store.armTrack(nextStage.trackId);
+      app.store.selectTrack(nextStage.trackId);
+    }
+    renderBaselineBanner();
+  });
+  dom.baselineFinishBtn.addEventListener('click', () => finishBaseline());
+  dom.baselineExitBtn.addEventListener('click', () => {
+    dom.baselineBanner.hidden = true;
+    toast('Baseline test paused. Resume it any time from the Trainer.');
+  });
+
+  dom.reportExport.addEventListener('click', () => {
+    if (!app.reportAttempt) return;
+    const text = formatReportText(app.reportAttempt);
+    downloadBlob(new Blob([text], { type: 'text/plain' }), `${safeName(app.reportAttempt.projectTitle)}-${safeName(app.reportAttempt.partName)}-report.txt`);
+  });
+}
+
+function setView(view) {
+  app.view = view;
+  document.querySelectorAll('.vtab').forEach((tab) => tab.classList.toggle('active', tab.dataset.view === view));
+  dom.studioMain.hidden = view !== 'studio';
+  dom.trainerMain.hidden = view !== 'trainer';
+  if (view === 'trainer') renderTrainer();
+  else app.ribbon.resize();
+}
+
+async function loadAttempts() {
+  app.attempts = await db.listAttempts();
+  app.baselineRange = await db.getTrainer('baselineRange', null);
+}
+
+/** Turn a scored take into a permanent progress record. */
+async function recordAttempt(trackId, takeId, { rescore = false } = {}) {
+  const project = app.store.project;
+  const track = project?.tracks.find((t) => t.id === trackId);
+  const take = track?.takes.find((t) => t.id === takeId);
+  if (!track || !take?.score) return;
+
+  const stage = isBaselineProject(project) ? stageFor(track) : null;
+  const attempt = buildAttempt({
+    project,
+    track,
+    take,
+    score: take.score,
+    range: app.baselineRange ?? currentRangeSummary(),
+    stageId: stage?.id ?? null,
+    // A baseline stage only reports the skills it was designed to test.
+    skillFilter: stage ? (stage.kind === 'sweep' ? ['pitch'] : ['pitch', ...(stage.skills ?? [])]) : null,
+  });
+
+  // Re-scoring an existing take (after editing its targets, or changing the
+  // transpose) revises that attempt rather than logging a second one — you
+  // only sang it once.
+  const existing = app.attempts.find((item) => item.takeId === takeId);
+  if (existing) {
+    attempt.id = existing.id;
+    attempt.at = existing.at;
+    app.attempts = app.attempts.map((item) => (item.id === existing.id ? attempt : item));
+  } else {
+    app.attempts = [attempt, ...app.attempts];
+  }
+  await db.saveAttempt(attempt);
+
+  if (!rescore && isBaselineProject(project)) {
+    renderBaselineBanner();
+    const state = baselineProgress(project, app.attempts);
+    if (state.finished) {
+      toast('All seven stages recorded. Building your profile…');
+      await finishBaseline();
+    } else if (state.next?.trackId) {
+      app.store.armTrack(state.next.trackId);
+      app.store.selectTrack(state.next.trackId);
+      toast(`Stage ${state.completed + 1} of ${state.total}: ${state.next.name.replace(/^\d+ · /, '')}`);
+    }
+  }
+  if (app.view === 'trainer') renderTrainer();
+}
+
+function currentRangeSummary() {
+  return rangeSummary(aggregateRange(app.attempts));
+}
+
+// --- baseline --------------------------------------------------------------
+
+async function startBaseline({ fresh }) {
+  let project = null;
+  if (!fresh) {
+    const saved = await db.listProjects();
+    project = saved.find((item) => item.sourceId === BASELINE_ID) ?? null;
+  }
+  if (!project) project = createProject(BASELINE_ID);
+
+  await loadProject(project);
+  setView('studio');
+  const state = baselineProgress(project, app.attempts);
+  if (state.next?.trackId) {
+    app.store.armTrack(state.next.trackId);
+    app.store.selectTrack(state.next.trackId);
+  }
+  renderBaselineBanner();
+  toast('Baseline test ready. Read each stage, then press Record this stage.');
+}
+
+function renderBaselineBanner() {
+  const project = app.store.project;
+  if (!isBaselineProject(project)) {
+    dom.baselineBanner.hidden = true;
+    return;
+  }
+  const state = baselineProgress(project, app.attempts);
+  const stage = state.next ?? state.stages[state.stages.length - 1];
+  dom.baselineBanner.hidden = false;
+  dom.baselineStageName.textContent = stage.name;
+  dom.baselineStageCount.textContent = `${state.completed} of ${state.total} done`;
+  dom.baselineInstruction.textContent = stage.instruction;
+  dom.baselineFinishBtn.hidden = state.completed === 0;
+  dom.baselineRecordBtn.hidden = state.finished;
+  dom.baselineSkipBtn.hidden = state.finished;
+}
+
+async function finishBaseline() {
+  const project = app.store.project;
+  const baselineAttempts = app.attempts.filter((attempt) => attempt.projectId === project?.id);
+  if (!baselineAttempts.length) {
+    toast('Record at least one stage first.', true);
+    return;
+  }
+  const range = rangeFromSweeps(baselineAttempts);
+  if (range) {
+    app.baselineRange = range;
+    await db.setTrainer('baselineRange', range);
+    await db.setTrainer('baselineAt', Date.now());
+  }
+  setView('trainer');
+  renderTrainer();
+  toast(range
+    ? `Range measured: ${range.lowName}–${range.highName}. Your profile is on the Trainer tab.`
+    : 'Profile updated. Record the range stages to measure your range.');
+}
+
+// --- rendering --------------------------------------------------------------
+
+function renderTrainer() {
+  const attempts = app.attempts;
+  const rangeMap = aggregateRange(attempts);
+  const summary = rangeSummary(rangeMap);
+  const effectiveRange = app.baselineRange ?? summary;
+  const skills = aggregateSkills(attempts);
+  const report = coachReport({ skills, range: summary, attempts, baselineRange: app.baselineRange });
+
+  dom.trainerLevel.textContent = report.level === null ? '—' : String(report.level);
+  dom.trainerLevel.style.color = report.level === null ? 'var(--muted)'
+    : colorForCents(report.level >= 88 ? 5 : report.level >= 75 ? 20 : report.level >= 60 ? 40 : 80);
+  dom.trainerHeadline.textContent = report.headline;
+
+  dom.trainerRangeSummary.textContent = effectiveRange?.low
+    ? `Range ${effectiveRange.lowName ?? midiToName(effectiveRange.low)}–${effectiveRange.highName ?? midiToName(effectiveRange.high)}` +
+      ` · ${attempts.length} attempt${attempts.length === 1 ? '' : 's'} recorded`
+    : `${attempts.length} attempt${attempts.length === 1 ? '' : 's'} recorded — no range measured yet`;
+
+  drawRangeMap(dom.rangeMap, rangeMap, {
+    reliableLow: app.baselineRange?.comfortableLow ?? summary.reliableLow,
+    reliableHigh: app.baselineRange?.comfortableHigh ?? summary.reliableHigh,
+  });
+  renderRangeFacts(rangeMap, summary);
+
+  renderSkills(dom.skillList, skills, { onDrill: (skillId) => practiseSkill(skillId) });
+  renderCoach(dom.coachPanel, report, {
+    onDrill: (drillId) => openDrill(drillId),
+    onBaseline: () => startBaseline({ fresh: true }),
+  });
+
+  dom.readinessProject.textContent = app.store.project ? `— ${app.store.project.title}` : '';
+  renderReadiness(dom.readinessPanel, songReadiness(app.store.project, { skills, range: effectiveRange }));
+
+  drawHistory(dom.historyChart, scoreHistory(attempts));
+  renderHistory(dom.historyList, attempts.slice(0, 60), { onOpen: (attempt) => openReport(attempt) });
+
+  dom.baselineResumeBtn.hidden = !app.attempts.some((attempt) => attempt.stageId);
+}
+
+function renderRangeFacts(rangeMap, summary) {
+  const range = app.baselineRange;
+  const facts = [];
+  if (range?.low) {
+    facts.push(`<span>Measured range <b>${range.lowName}–${range.highName}</b> (${range.semitones} semitones)</span>`);
+    if (range.comfortableLow) facts.push(`<span>Reliable across <b>${range.comfortableLowName}–${range.comfortableHighName}</b></span>`);
+  } else if (summary.low !== null) {
+    facts.push(`<span>Pitches sung <b>${summary.lowName}–${summary.highName}</b></span>`);
+  }
+  if (summary.strongest) facts.push(`<span>Strongest pitch <b>${summary.strongest.name}</b> (${summary.strongest.absCents}¢)</span>`);
+  if (summary.weakest) facts.push(`<span>Weakest pitch <b>${summary.weakest.name}</b> (${summary.weakest.absCents}¢)</span>`);
+  if (summary.notes) facts.push(`<span>Notes measured <b>${summary.notes}</b></span>`);
+  dom.rangeFacts.innerHTML = facts.join('') || '<span>Nothing measured yet.</span>';
+}
+
+function openReport(attempt) {
+  app.reportAttempt = attempt;
+  renderReport(dom.reportBody, attempt);
+  dom.reportDialog.showModal();
+}
+
+/** Jump straight from a weak skill into a drill that trains it. */
+function practiseSkill(skillId) {
+  const drills = EXERCISES.filter((exercise) => exercise.skills?.includes(skillId));
+  if (!drills.length) {
+    toast('No drill covers that skill yet.', true);
+    return;
+  }
+  openDrill(drills[0].id);
+}
+
+async function openDrill(drillId) {
+  if (!drillId) return;
+  const drill = EXERCISES.find((exercise) => exercise.id === drillId);
+  if (!drill) return;
+  await loadProject(createProject(drillId));
+  setView('studio');
+  toast(`${drill.title} — arm a part and record.`);
+}
+
+async function exportProgress() {
+  if (!app.attempts.length) {
+    toast('No progress to export yet.', true);
+    return;
+  }
+  const rangeMap = aggregateRange(app.attempts);
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    baselineRange: app.baselineRange,
+    rangeSummary: rangeSummary(rangeMap),
+    rangeMap,
+    skills: aggregateSkills(app.attempts),
+    attempts: app.attempts,
+  };
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), 'jayasongmatch-progress.json');
+  toast(`Exported ${app.attempts.length} attempts.`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1680,6 +2001,7 @@ function renderAll() {
   renderScorecard();
   renderRibbon();
   renderLyrics();
+  renderBaselineBanner();
   renderLibrary();
 }
 

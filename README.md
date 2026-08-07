@@ -35,6 +35,9 @@ check your whole signal path before touching a real song:
 3. In **⚙ → Calibrate latency**, run the calibration once (see below).
 4. Arm the **Lead** part (the red **Arm** button on its mixer strip), press
    **●**, and sing the three long notes. Stop, and read your score.
+5. When the signal path works, switch to the **Trainer** tab and run the
+   baseline test — it measures your range and gives the coach something to
+   work from.
 
 ---
 
@@ -210,6 +213,109 @@ late, this is the setting to check first.
 
 ---
 
+## The Trainer
+
+The **Trainer** tab is a separate section from the Studio. The Studio is where
+you record; the Trainer is where the results are read back to you as ability,
+and where a coach tells you what to do about it.
+
+Everything it shows is computed from attempts you have actually recorded.
+Nothing is estimated or assumed.
+
+### Baseline test
+
+Start here. **Run baseline vocal test** builds a seven-stage assessment and
+walks you through it — one stage per recording, auto-advancing as you go:
+
+1. **Range downwards** — whole tones down from middle C. Stop when you run out
+   of comfortable notes; silence is a valid answer.
+2. **Range upwards** — the same going up. Falsetto counts.
+3. **Sustain** — three long tones, testing breath support and steadiness.
+4. **Onsets** — short notes from silence, testing whether you arrive on the note
+   or slide into it.
+5. **Leaps** — jumps away from a home note and back.
+6. **Agility** — a scale run at speed.
+7. **Timing** — one note, once a second, on the click.
+
+You can stop after any stage; **See my results** builds a profile from whatever
+you have done. Range detection requires contiguity, so a stray microphone thump
+an octave below everything else does not get counted as part of your range.
+
+The result separates two different things: the notes you can **reach at all**,
+and the narrower band you are **reliable across**. The second is the one that
+matters when choosing a part.
+
+### Range database
+
+Every take contributes per-pitch accuracy to a database that persists across
+sessions. The range map shades each semitone by how accurately you sing it —
+green through red — with the reliable band marked, and dims pitches measured
+from too few notes to trust. Below it: your strongest and weakest pitches by
+name, and how many notes each figure rests on.
+
+### Skills
+
+Eight measured abilities, each derived from the notes that actually tested it:
+
+| Skill | Measured from |
+|---|---|
+| **Pitch accuracy** | How far each note sat from its target |
+| **Steadiness** | How much a held pitch wobbles around its centre |
+| **Timing** | How close entries land to the target's start |
+| **Breath support** | Whether long notes sag or thin in their last third |
+| **Onsets** | How far the attack sits from where the note settles |
+| **Agility** | Accuracy on notes shorter than a third of a second |
+| **Leaps** | Accuracy on notes arrived at by five semitones or more |
+| **Range extremes** | Accuracy near the edges of your measured range |
+
+**A skill is only scored when a take actually tested it.** A song with no leaps
+says nothing about your leaps, so it contributes no sample rather than a
+misleading zero. Recent attempts are weighted more heavily than old ones, and
+each skill carries a trend arrow comparing your recent attempts with earlier
+ones. A figure resting on fewer than four measured notes is marked provisional
+with an asterisk rather than presented as settled.
+
+Click any skill to jump straight into a drill that trains it.
+
+### Your coach
+
+The coach reads the profile and writes an assessment: what is working, at most
+**three** things to focus on — practising everything at once is how people
+improve at nothing — and, for each, why it matters and a specific drill to fix
+it. It also draws conclusions across takes that a single score cannot:
+
+- a consistent sharp or flat bias, named as one habit rather than many mistakes;
+- an ear ahead of the breath — short notes land, long ones sag;
+- accuracy that holds when you have time and collapses when you do not;
+- whether your last three takes are better or worse than the three before.
+
+### Can I sing this?
+
+For whichever project is open in the Studio, the Trainer measures what each part
+actually demands from its target notes — its range, how many wide leaps, how
+much fast movement, how many sustained notes, how many entries from silence —
+and sets that against your measured ability. Each part comes back **in reach**,
+**a stretch**, or **out of range**, with the reason and the fix: how many
+semitones to transpose, or which skill to work on first.
+
+This is the link from "a song I want to sing" to "the skills it needs".
+
+### Attempt reports and history
+
+Every scored take is kept as a permanent record, independent of the project it
+came from — editing or deleting a project does not rewrite your history. Each
+one opens a full **summary report**: overall and component scores, accuracy
+statistics, the pitches it covered, which skills it tested, what to fix, and the
+complete note-by-note table. **Save as text** writes it to a file you can keep.
+
+**Export progress** writes the whole database — every attempt, the range map,
+the skill profile — as JSON.
+
+Re-scoring a take (after editing its targets, or changing the transpose) revises
+that attempt rather than logging a second one. You only sang it once.
+
+---
+
 ## Windows input notes
 
 The **Input** dropdown lists every Windows capture endpoint, so you can use:
@@ -240,6 +346,7 @@ back and will also pollute your recording; use headphones.
 | `R` | Record / stop |
 | `L` | Toggle loop |
 | `T` | Stamp the next lyric line (while Tap to time is on) |
+| `↑` / `↓` | Select the previous / next part |
 | `Home` | Back to the start |
 | `↑` / `↓` | Select the previous / next part |
 
@@ -267,10 +374,10 @@ To add your own song, copy an entry in `js/data/songs.js`.
 
 ## Storage
 
-Projects, lyrics and audio live in your browser's IndexedDB, per browser
-profile. They
+Projects, lyrics, audio and your whole progress history live in your browser's
+IndexedDB, per browser profile. They
 survive restarts. Clearing site data for `localhost` deletes them, so export
-anything you want to keep with **Export mix as WAV**.
+anything you want to keep with **Export mix as WAV** and **Export progress**.
 
 ---
 
@@ -295,7 +402,8 @@ Layout:
 js/audio/    AudioContext graph, transport, mixer, capture worklet, WAV I/O
 js/dsp/      YIN pitch detection, contour tracking, note segmentation
 js/score.js  accuracy scoring
-js/ui/       pitch ribbon canvas, lyric band and sheet, target-note notation
+js/ui/       pitch ribbon canvas, lyric band and sheet, trainer views
 js/data/     song structures, built-in drills, LRC lyric timing
+js/trainer/  skill model, baseline test, coach, attempt records
 js/state.js  project model and persistence
 ```

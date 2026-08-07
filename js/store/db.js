@@ -2,10 +2,12 @@
 // live in IndexedDB so sessions survive a browser restart.
 
 const DB_NAME = 'jayasongmatch';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_PROJECTS = 'projects';
 const STORE_AUDIO = 'audio';
 const STORE_SETTINGS = 'settings';
+const STORE_ATTEMPTS = 'attempts';   // one record per analysed take, kept forever
+const STORE_TRAINER = 'trainer';     // baseline results and trainer preferences
 
 let dbPromise = null;
 
@@ -18,6 +20,12 @@ function open() {
       if (!db.objectStoreNames.contains(STORE_PROJECTS)) db.createObjectStore(STORE_PROJECTS, { keyPath: 'id' });
       if (!db.objectStoreNames.contains(STORE_AUDIO)) db.createObjectStore(STORE_AUDIO);
       if (!db.objectStoreNames.contains(STORE_SETTINGS)) db.createObjectStore(STORE_SETTINGS);
+      if (!db.objectStoreNames.contains(STORE_ATTEMPTS)) {
+        const attempts = db.createObjectStore(STORE_ATTEMPTS, { keyPath: 'id' });
+        attempts.createIndex('at', 'at');
+        attempts.createIndex('projectId', 'projectId');
+      }
+      if (!db.objectStoreNames.contains(STORE_TRAINER)) db.createObjectStore(STORE_TRAINER);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -79,6 +87,35 @@ export const db = {
 
   async getSetting(key, fallback = null) {
     const value = await run(STORE_SETTINGS, 'readonly', (store) => store.get(key));
+    return value === undefined ? fallback : value;
+  },
+
+  // --- progress tracking ---------------------------------------------------
+
+  async saveAttempt(attempt) {
+    return run(STORE_ATTEMPTS, 'readwrite', (store) => store.put(attempt));
+  },
+
+  async listAttempts({ limit = 0 } = {}) {
+    const attempts = await run(STORE_ATTEMPTS, 'readonly', (store) => store.getAll());
+    const sorted = (attempts ?? []).sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+    return limit > 0 ? sorted.slice(0, limit) : sorted;
+  },
+
+  async deleteAttempt(id) {
+    return run(STORE_ATTEMPTS, 'readwrite', (store) => store.delete(id));
+  },
+
+  async clearAttempts() {
+    return run(STORE_ATTEMPTS, 'readwrite', (store) => store.clear());
+  },
+
+  async setTrainer(key, value) {
+    return run(STORE_TRAINER, 'readwrite', (store) => store.put(value, key));
+  },
+
+  async getTrainer(key, fallback = null) {
+    const value = await run(STORE_TRAINER, 'readonly', (store) => store.get(key));
     return value === undefined ? fallback : value;
   },
 

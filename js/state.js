@@ -5,10 +5,12 @@
 import { db } from './store/db.js';
 import { getSong, barDuration } from './data/songs.js';
 import { getExercise } from './data/exercises.js';
+import { baselineSource, BASELINE_ID } from './trainer/baseline.js';
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `id-${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
 export function createProject(sourceId) {
+  if (sourceId === BASELINE_ID) return projectFromExercise(baselineSource());
   const exercise = getExercise(sourceId);
   return exercise ? projectFromExercise(exercise) : projectFromSong(getSong(sourceId) ?? getSong('custom'));
 }

@@ -18,6 +18,11 @@
     </div>
   </div>
 
+  <div class="view-switch">
+    <button class="vtab active" data-view="studio">Studio</button>
+    <button class="vtab" data-view="trainer">Trainer</button>
+  </div>
+
   <div class="group input-group">
     <label class="field">
       <span>Input</span>
@@ -75,6 +80,20 @@
   </aside>
 
   <section class="stage">
+    <div class="baseline-banner" id="baseline-banner" hidden>
+      <div class="baseline-progress">
+        <strong id="baseline-stage-name"></strong>
+        <span id="baseline-stage-count" class="tag"></span>
+      </div>
+      <div class="baseline-instruction" id="baseline-instruction"></div>
+      <div class="baseline-actions">
+        <button id="baseline-record-btn" class="small-btn primary">Record this stage</button>
+        <button id="baseline-skip-btn" class="small-btn">Skip</button>
+        <button id="baseline-finish-btn" class="small-btn">See my results</button>
+        <button id="baseline-exit-btn" class="small-btn">Leave test</button>
+      </div>
+    </div>
+
     <div class="stage-head">
       <div class="part-title">
         <span class="swatch" id="part-swatch"></span>
@@ -161,6 +180,74 @@
     <menu>
       <button value="cancel" class="small-btn">Cancel</button>
       <button value="save" id="target-save" class="small-btn primary">Save targets</button>
+    </menu>
+  </form>
+</dialog>
+
+<main id="trainer-main" class="trainer-main" hidden>
+  <div class="trainer-scroll">
+
+    <section class="trainer-card hero">
+      <div class="hero-level">
+        <div class="hero-value" id="trainer-level">—</div>
+        <div class="hero-label">overall</div>
+      </div>
+      <div class="hero-body">
+        <h2 id="trainer-headline">Run the baseline test to get started.</h2>
+        <div class="hero-meta" id="trainer-range-summary"></div>
+        <div class="hero-actions">
+          <button id="baseline-start-btn" class="small-btn primary">Run baseline vocal test</button>
+          <button id="baseline-resume-btn" class="small-btn" hidden>Resume baseline test</button>
+          <button id="export-progress-btn" class="small-btn">Export progress</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="trainer-card">
+      <h3>Your range</h3>
+      <div class="canvas-wrap tall"><canvas id="range-map"></canvas></div>
+      <div class="range-facts" id="range-facts"></div>
+    </section>
+
+    <section class="trainer-card">
+      <h3>Skills</h3>
+      <p class="card-hint">Measured from every take you have recorded. Click a skill to practise it.</p>
+      <div class="skill-list" id="skill-list"></div>
+    </section>
+
+    <section class="trainer-card">
+      <h3>Your coach</h3>
+      <div class="coach" id="coach-panel"></div>
+    </section>
+
+    <section class="trainer-card">
+      <h3>Can I sing this? <span class="card-sub" id="readiness-project"></span></h3>
+      <p class="card-hint">What the parts of the project open in the Studio demand, set against what you can currently do.</p>
+      <div class="readiness" id="readiness-panel"></div>
+    </section>
+
+    <section class="trainer-card">
+      <h3>Progress</h3>
+      <div class="canvas-wrap"><canvas id="history-chart"></canvas></div>
+    </section>
+
+    <section class="trainer-card">
+      <div class="card-head-row">
+        <h3>Attempt history</h3>
+        <button id="clear-history-btn" class="small-btn danger">Clear history</button>
+      </div>
+      <div class="history" id="history-list"></div>
+    </section>
+
+  </div>
+</main>
+
+<dialog id="report-dialog" class="dialog wide">
+  <form method="dialog">
+    <div class="report" id="report-body"></div>
+    <menu>
+      <button type="button" value="export" id="report-export" class="small-btn">Save as text</button>
+      <button value="close" class="small-btn primary">Close</button>
     </menu>
   </form>
 </dialog>

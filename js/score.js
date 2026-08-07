@@ -57,6 +57,10 @@ export function scoreTake(track, targets, opts = {}) {
     const from = target.time + guard;
     const to = target.time + target.duration - Math.min(0.05, target.duration * 0.15);
 
+    // Frames are kept, not just their cents, so the trainer can ask further
+    // questions of the same note: did it slide in, did it sag as breath ran
+    // out, did the tone thin at the end.
+    const frames = [];
     const centsSamples = [];
     let voicedFrames = 0;
     let totalFrames = 0;
@@ -72,7 +76,9 @@ export function scoreTake(track, targets, opts = {}) {
       voicedFrames++;
       peakLevel = Math.max(peakLevel, track.rms[i]);
       if (onsetTime === null) onsetTime = t;
-      centsSamples.push(centsError(track.hz[i], targetMidi, { octaveAgnostic, a4 }));
+      const cents = centsError(track.hz[i], targetMidi, { octaveAgnostic, a4 });
+      centsSamples.push(cents);
+      frames.push({ t: t - target.time, cents, rms: track.rms[i] });
     }
 
     // Look slightly outside the note for the real onset, so an early or late
@@ -83,7 +89,18 @@ export function scoreTake(track, targets, opts = {}) {
     const earliest = previous ? Math.max(target.time - 0.25, previous.time + previous.duration) : target.time - 0.25;
     const searchOnset = findOnset(track, earliest, target.time + Math.min(0.35, target.duration), opts);
 
-    notes.push(buildNoteResult(target, targetMidi, centsSamples, voicedFrames, totalFrames, searchOnset ?? onsetTime, peakLevel));
+    const previousMidi = previous ? previous.midi + transpose : null;
+    notes.push(buildNoteResult({
+      target,
+      targetMidi,
+      previousMidi,
+      centsSamples,
+      frames,
+      voicedFrames,
+      totalFrames,
+      onsetTime: searchOnset ?? onsetTime,
+      peakLevel,
+    }));
   }
 
   const sung = notes.filter((n) => n.coverage >= 0.25);
@@ -134,11 +151,12 @@ export function scoreTake(track, targets, opts = {}) {
       withinFair: round(inTune(TOLERANCE_CENTS.fair)),
     },
     notes,
+    rangeProfile: buildRangeProfile(notes),
     advice: buildAdvice(notes, sung, overall),
   };
 }
 
-function buildNoteResult(target, targetMidi, centsSamples, voicedFrames, totalFrames, onsetTime, peakLevel) {
+function buildNoteResult({ target, targetMidi, previousMidi, centsSamples, frames, voicedFrames, totalFrames, onsetTime, peakLevel }) {
   const coverage = totalFrames > 0 ? voicedFrames / totalFrames : 0;
   const hasPitch = centsSamples.length > 0;
   const cents = hasPitch ? median(centsSamples) : null;
@@ -158,7 +176,93 @@ function buildNoteResult(target, targetMidi, centsSamples, voicedFrames, totalFr
     timingOffset: timingOffset === null ? null : round2(timingOffset),
     level: round2(peakLevel),
     verdict: verdictFor(coverage, cents),
+    // The interval you had to travel to arrive here — leaps are their own skill.
+    leap: previousMidi === null ? null : Math.abs(targetMidi - previousMidi),
+    ...noteDiagnostics(frames, cents, target.duration, peakLevel),
   };
+}
+
+/**
+ * Extra measurements the vocal trainer reasons about. All are null when there
+ * is too little voiced material to say anything honest.
+ */
+function noteDiagnostics(frames, cents, duration, peakLevel) {
+  const empty = { scoop: null, drift: null, fade: null, settleTime: null };
+  if (!frames.length || cents === null) return empty;
+
+  // Scoop: how far the attack sits from where the note eventually settles.
+  // Negative means you slid up into it, positive means you came down onto it.
+  const attack = frames.filter((f) => f.t <= (frames[0]?.t ?? 0) + 0.12);
+  const scoop = attack.length >= 2 ? median(attack.map((f) => f.cents)) - cents : null;
+
+  // Drift: last third against first third. Sagging late in a long note is a
+  // breath-support problem, not an ear problem, and wants different practice.
+  let drift = null;
+  if (duration >= 0.6 && frames.length >= 6) {
+    const start = frames[0].t;
+    const span = frames[frames.length - 1].t - start;
+    if (span > 0.2) {
+      const first = frames.filter((f) => f.t <= start + span / 3).map((f) => f.cents);
+      const last = frames.filter((f) => f.t >= start + (2 * span) / 3).map((f) => f.cents);
+      if (first.length >= 2 && last.length >= 2) drift = median(last) - median(first);
+    }
+  }
+
+  // Fade: how much the tone thinned by the end, relative to its own peak.
+  let fade = null;
+  if (duration >= 0.6 && peakLevel > 0 && frames.length >= 6) {
+    const start = frames[0].t;
+    const span = frames[frames.length - 1].t - start;
+    const tail = frames.filter((f) => f.t >= start + span * 0.75).map((f) => f.rms);
+    if (tail.length) fade = 1 - Math.max(...tail) / peakLevel;
+  }
+
+  // Settle time: how long until the pitch stayed inside a quarter tone.
+  let settleTime = null;
+  for (let i = 0; i < frames.length; i++) {
+    if (Math.abs(frames[i].cents) <= TOLERANCE_CENTS.fair) {
+      settleTime = Math.max(0, frames[i].t - frames[0].t);
+      break;
+    }
+  }
+
+  return {
+    scoop: scoop === null ? null : round(scoop),
+    drift: drift === null ? null : round(drift),
+    fade: fade === null ? null : round2(fade),
+    settleTime: settleTime === null ? null : round2(settleTime),
+  };
+}
+
+/**
+ * Per-pitch accuracy for this take, which is what the progress database
+ * accumulates into a picture of your range.
+ */
+function buildRangeProfile(notes) {
+  const buckets = new Map();
+  for (const note of notes) {
+    if (note.coverage < 0.25 || note.cents === null) continue;
+    const entry = buckets.get(note.midi) ?? { midi: note.midi, notes: 0, absCents: 0, bias: 0, inTune: 0, seconds: 0, level: 0 };
+    entry.notes += 1;
+    entry.absCents += note.centsAbs;
+    entry.bias += note.cents;
+    entry.inTune += note.centsAbs <= TOLERANCE_CENTS.good ? 1 : 0;
+    entry.seconds += note.duration * note.coverage;
+    entry.level = Math.max(entry.level, note.level);
+    buckets.set(note.midi, entry);
+  }
+  return [...buckets.values()]
+    .map((entry) => ({
+      midi: entry.midi,
+      name: midiToName(entry.midi),
+      notes: entry.notes,
+      seconds: round2(entry.seconds),
+      absCents: round(entry.absCents / entry.notes),
+      bias: round(entry.bias / entry.notes),
+      inTunePct: round((100 * entry.inTune) / entry.notes),
+      level: entry.level,
+    }))
+    .sort((a, b) => a.midi - b.midi);
 }
 
 function verdictFor(coverage, cents) {
@@ -255,6 +359,7 @@ function emptyResult(message) {
     parts: { pitch: 0, timing: 0, coverage: 0, stability: 0 },
     stats: { notesTotal: 0, notesSung: 0, notesMissed: 0, medianCents: null, bias: null, withinPerfect: 0, withinGood: 0, withinFair: 0 },
     notes: [],
+    rangeProfile: [],
     advice: [message],
   };
 }

@@ -16,6 +16,11 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute is only a UA-stylesheet `display: none`, so any author
+ * rule that sets display — `main { display: grid }` below, for one — silently
+ * defeats it. Views toggled with `hidden` need this to actually disappear. */
+[hidden] { display: none !important; }
+
 html, body {
   height: 100%;
   margin: 0;
@@ -283,6 +288,96 @@ table.notes tr:hover { background: #161b24; cursor: pointer; }
 
 .strip-meta { font-size: 10.5px; color: var(--muted); margin-top: 5px; line-height: 1.35; }
 .strip-meta .warn { color: var(--warn); }
+
+/* ---------- view switch & trainer ---------- */
+.view-switch { display: flex; gap: 3px; background: #0a0d12; border: 1px solid var(--line); border-radius: 7px; padding: 3px; }
+.vtab { padding: 5px 15px; font-size: 12px; background: transparent; border-color: transparent; color: var(--muted); }
+.vtab.active { background: var(--panel-2); border-color: var(--line); color: var(--text); font-weight: 600; }
+
+/* Explicit display, because `main { display: grid }` above would otherwise
+ * impose the Studio's three-column template on this view too. The scroller
+ * inside does its own grid. */
+.trainer-main { display: block; height: calc(100vh - 53px); overflow: hidden; background: var(--bg); }
+.trainer-scroll { height: 100%; overflow-y: auto; padding: 16px; display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); align-content: start; }
+.trainer-card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.trainer-card h3 { margin: 0 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--muted); }
+.card-sub { text-transform: none; letter-spacing: 0; color: #7d8698; font-weight: 400; }
+.card-hint { color: var(--muted); font-size: 11.5px; margin: 0 0 10px; }
+.card-head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.trainer-card.hero { grid-column: 1 / -1; display: flex; gap: 20px; align-items: center; }
+.hero-level { text-align: center; min-width: 110px; padding: 10px 16px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; }
+.hero-value { font-size: 42px; font-weight: 700; font-family: ui-monospace, monospace; line-height: 1; }
+.hero-label { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+.hero-body { flex: 1; min-width: 0; }
+.hero-body h2 { margin: 0 0 6px; font-size: 16px; line-height: 1.4; font-weight: 600; }
+.hero-meta { color: #a8b1c4; font-size: 12px; margin-bottom: 10px; }
+.hero-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.canvas-wrap { height: 110px; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.canvas-wrap.tall { height: 140px; }
+.canvas-wrap canvas { width: 100%; height: 100%; display: block; }
+.range-facts { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-size: 11.5px; color: var(--muted); }
+.range-facts b { color: var(--text); font-family: ui-monospace, monospace; }
+
+.skill-list { display: grid; gap: 7px; }
+.skill-row { display: grid; grid-template-columns: 108px 1fr 30px 34px; grid-template-areas: "name bar value trend" "detail detail detail detail"; gap: 3px 9px; align-items: center; padding: 5px 7px; border-radius: 6px; }
+.skill-row.clickable { cursor: pointer; }
+.skill-row.clickable:hover { background: #171c26; }
+.skill-row.untested { opacity: 0.55; }
+.skill-row.provisional .skill-value { opacity: 0.75; }
+.skill-row.provisional .skill-value::after { content: '*'; color: var(--warn); font-size: 10px; }
+.skill-name { grid-area: name; font-size: 12px; }
+.skill-bar { grid-area: bar; height: 8px; background: #0a0d12; border-radius: 4px; overflow: hidden; }
+.skill-bar > div { height: 100%; transition: width 0.3s; }
+.skill-value { grid-area: value; font-family: ui-monospace, monospace; font-size: 12px; text-align: right; }
+.skill-trend { grid-area: trend; font-family: ui-monospace, monospace; font-size: 10.5px; text-align: right; }
+.skill-detail { grid-area: detail; font-size: 10.5px; color: var(--muted); padding-left: 1px; }
+
+.coach-headline { font-size: 13.5px; line-height: 1.5; margin-bottom: 10px; color: #dbe3f2; }
+.coach-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.9px; color: var(--muted); margin-right: 6px; }
+.coach-strengths { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.focus-card { border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 7px; padding: 9px 11px; margin-bottom: 9px; background: var(--panel-2); }
+.focus-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.focus-score { font-family: ui-monospace, monospace; font-size: 12px; }
+.focus-why { font-size: 11.5px; color: #a8b1c4; margin-bottom: 5px; }
+.focus-fix { font-size: 12px; color: #dbe3f2; line-height: 1.5; }
+.focus-drills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+
+.readiness-card { border: 1px solid var(--line); border-radius: 7px; padding: 9px 11px; margin-bottom: 8px; background: var(--panel-2); }
+.readiness-card.ready { border-left: 3px solid var(--good); }
+.readiness-card.stretch { border-left: 3px solid var(--warn); }
+.readiness-card.out-of-range { border-left: 3px solid var(--bad); }
+.readiness-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.readiness-span { font-size: 10.5px; color: var(--muted); font-family: ui-monospace, monospace; margin-left: auto; }
+
+.history { max-height: 330px; overflow-y: auto; }
+.history-row { display: flex; align-items: center; gap: 11px; padding: 7px 6px; border-bottom: 1px solid #1c212b; }
+.history-row:hover { background: #171c26; }
+.history-score { font-family: ui-monospace, monospace; font-size: 19px; font-weight: 600; min-width: 34px; text-align: center; }
+.history-body { flex: 1; min-width: 0; }
+.history-title { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-meta { font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- baseline runner ---------- */
+.baseline-banner { background: linear-gradient(90deg, #1a2438, #141a26); border-bottom: 1px solid var(--accent); padding: 10px 14px; }
+.baseline-progress { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; }
+.baseline-instruction { font-size: 12.5px; color: #cfd8ea; line-height: 1.5; margin-bottom: 8px; }
+.baseline-actions { display: flex; gap: 7px; flex-wrap: wrap; }
+
+/* ---------- report ---------- */
+.dialog.wide { max-width: 780px; }
+.report { max-height: 68vh; overflow-y: auto; }
+.report-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 12px; }
+.report-head h4 { margin: 0 0 3px; font-size: 15px; }
+.report-meta { font-size: 11px; color: var(--muted); }
+.report-score { text-align: center; }
+.report-value { font-size: 34px; font-weight: 700; font-family: ui-monospace, monospace; line-height: 1; }
+.report-grade { font-size: 11px; color: var(--muted); }
+.report-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.report-cell { background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 7px; text-align: center; }
+.report-cell-label { font-size: 10px; color: var(--muted); text-transform: capitalize; }
+.report-cell-value { font-size: 19px; font-family: ui-monospace, monospace; font-weight: 600; }
+.report-skills { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
 
 /* ---------- dialogs & toast ---------- */
 .dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); max-width: 620px; width: 92vw; padding: 0; }
