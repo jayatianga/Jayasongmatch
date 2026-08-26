@@ -16,7 +16,7 @@ import { buildAttempt, formatReportText } from './trainer/attempt.js';
 import { coachReport, songReadiness } from './trainer/coach.js';
 import { BASELINE_ID, baselineProgress, isBaselineProject, rangeFromSweeps, stageFor } from './trainer/baseline.js';
 import { drawRangeMap, drawHistory, renderSkills, renderCoach, renderReadiness, renderHistory, renderReport } from './ui/trainer.js';
-import { isIOS, isTouch, isStandalone, capabilities, canChooseInputDevice, requestPersistentStorage, ScreenLock, platformNotes, IS_WINDOWS_BUILD } from './platform.js';
+import { isIOS, isTouch, isStandalone, capabilities, canChooseInputDevice, requestPersistentStorage, ScreenLock, platformNotes, IS_DESKTOP_BUILD } from './platform.js';
 import { parseTargets, formatTargets, targetsSummary, rangeWarning, shiftTargets } from './ui/noteeditor.js';
 import { midiToName, midiToHz, hzToMidi, centsFrom } from './dsp/notes.js';
 import { yin, rms } from './dsp/yin.js';
@@ -1023,9 +1023,9 @@ function reportCapabilities() {
 }
 
 async function registerServiceWorker() {
-  // The Windows build ships no sw.js, so registering would just 404 on every
+  // The desktop builds ship no sw.js, so registering would just 404 on every
   // launch. Offline install is an iOS-build feature.
-  if (IS_WINDOWS_BUILD) return;
+  if (IS_DESKTOP_BUILD) return;
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
   try {
     // sw.js sits beside index.html, so resolve against the document rather

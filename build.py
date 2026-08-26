@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
-"""Produce the Windows and iOS versions of Jayasongmatch.
+"""Produce the Windows, macOS and iOS versions of Jayasongmatch.
 
-Both are built from this one source tree so they cannot drift apart. Each comes
-out as a complete, self-contained folder you can copy anywhere and run:
+All three are built from this one source tree so they cannot drift apart. Each
+comes out as a complete, self-contained folder you can copy anywhere and run:
 
-    python build.py                 # build both
-    python build.py windows         # just one
+    python build.py                 # build all three
+    python build.py macos           # just one
     python build.py --out somewhere # somewhere other than dist/
 
 What actually differs between them:
 
-  Windows   input and channel pickers, loopback capture notes, plain http on
+  Windows   input and channel pickers, Stereo Mix loopback notes, plain http on
             localhost, a double-click .bat launcher.
+  macOS     the same pickers, a double-click .command launcher, and notes on
+            adding a loopback device since macOS ships none.
   iOS       no input pickers (iOS chooses the device), https with a
             certificate the device can trust, web app manifest, icons and a
             service worker so it installs to the Home Screen and works offline.
 
 Everything else — the recorder, the scoring, the lyrics, the trainer — is the
-same code in both.
+same code in all three.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-TARGETS = ("windows", "ios")
+TARGETS = ("windows", "macos", "ios")
 
 # Copied into every build.
 SHARED_DIRS = ("js", "css")
@@ -43,26 +45,29 @@ TARGET_ONLY = {
         "dirs": ("assets",),
     },
     "windows": {"files": (), "dirs": ()},
+    "macos": {"files": (), "dirs": ()},
 }
 
 # Never copied: source-only tooling and working files.
 SKIP_NAMES = {"__pycache__", ".certs", "node_modules", ".git", "dist"}
 SKIP_SUFFIXES = {".pyc"}
 
+# A block may name more than one build: `<!-- build:windows,macos -->`. The
+# closing marker repeats the same list, so nested blocks stay unambiguous.
 BLOCK = re.compile(
-    r"[ \t]*<!--\s*build:(?P<name>[a-z]+)\s*-->.*?<!--\s*/build:(?P=name)\s*-->[ \t]*\n?",
+    r"[ \t]*<!--\s*build:(?P<name>[a-z,]+)\s*-->.*?<!--\s*/build:(?P=name)\s*-->[ \t]*\n?",
     re.DOTALL,
 )
+MARKER = re.compile(r"[ \t]*<!--\s*/?build:[a-z,]+\s*-->[ \t]*\n?")
 
 
 def strip_blocks(html: str, target: str) -> str:
     """Remove `<!-- build:x -->` sections that are not for this target."""
     def keep(match: re.Match) -> str:
-        if match.group("name") == target:
+        names = [name.strip() for name in match.group("name").split(",")]
+        if target in names:
             # Keep the contents, drop the markers themselves.
-            inner = match.group(0)
-            inner = re.sub(r"[ \t]*<!--\s*/?build:[a-z]+\s*-->[ \t]*\n?", "", inner)
-            return inner
+            return MARKER.sub("", match.group(0))
         return ""
     return BLOCK.sub(keep, html)
 
@@ -149,6 +154,37 @@ cd "$(dirname "$0")" || exit 1
 exec python3 serve.py --https "$@"
 """
 
+# A .command file is what macOS runs when you double-click it in Finder.
+MACOS_LAUNCHER = """#!/bin/sh
+# Double-click this file in Finder to start Jayasongmatch.
+cd "$(dirname "$0")" || exit 1
+
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 serve.py "$@"
+fi
+
+cat <<'MESSAGE'
+
+Python 3 was not found.
+
+macOS does not always include it. Either:
+  xcode-select --install          (installs Apple's command line tools)
+or install it from https://www.python.org/downloads/macos/
+
+Then double-click this file again.
+
+MESSAGE
+read -r _ 2>/dev/null
+exit 1
+"""
+
+MACOS_IPAD_LAUNCHER = """#!/bin/sh
+# Serve over https so an iPhone or iPad on the same Wi-Fi can use the
+# microphone. See README.md for the one-time certificate setup on the device.
+cd "$(dirname "$0")" || exit 1
+exec python3 serve.py --https "$@"
+"""
+
 
 def build_js_module(target: str) -> str:
     return (
@@ -156,9 +192,84 @@ def build_js_module(target: str) -> str:
         f"// This is the {target} build of Jayasongmatch.\n\n"
         f"export const TARGET = '{target}';\n\n"
         f"export const IS_WINDOWS_BUILD = TARGET === 'windows';\n"
+        f"export const IS_MACOS_BUILD = TARGET === 'macos';\n"
         f"export const IS_IOS_BUILD = TARGET === 'ios';\n"
+        f"export const IS_DESKTOP_BUILD = IS_WINDOWS_BUILD || IS_MACOS_BUILD;\n"
         f"export const IS_UNIVERSAL_BUILD = TARGET === 'universal';\n"
     )
+
+
+def macos_readme(stamp: str) -> str:
+    return f"""# Jayasongmatch — macOS
+
+Record vocal harmony parts one at a time, score how closely each matched, mix
+any part in or out, and train the skills behind them.
+
+This is the **macOS version**. Everything runs on this Mac; nothing is uploaded.
+
+## Start it
+
+1. Double-click **`start-macos.command`**. Terminal opens and a browser follows,
+   at `http://localhost:8770/`.
+2. Click **⟳** beside *Input* and allow microphone access, so your devices
+   appear by name.
+3. **Put on headphones.**
+
+Press Ctrl+C in the Terminal window, or close it, to stop.
+
+> **"cannot be opened because it is from an unidentified developer"** — macOS
+> quarantines files that arrived from the internet. Right-click
+> `start-macos.command` → **Open** → **Open**, once. Or clear the flag from
+> Terminal: `xattr -d com.apple.quarantine start-macos.command`
+>
+> **"python3: command not found"** — run `xcode-select --install`, or install
+> Python from [python.org](https://www.python.org/downloads/macos/).
+
+Chrome, Edge and Safari all work. Safari needs **14.1 or newer**.
+
+## What this version has
+
+- **Full input device choice.** Any Core Audio input: an interface, a USB
+  microphone, or a specific channel of a multi-channel interface via the **Ch**
+  dropdown.
+- **Keyboard shortcuts** — Space play/stop, `R` record, `L` loop, `Home` rewind,
+  `↑`/`↓` change part, `T` stamp a lyric line.
+
+macOS voice processing is switched off deliberately: echo cancellation, noise
+suppression and auto gain all distort sung pitch and would make the scores
+meaningless.
+
+## Recording what the Mac is playing
+
+macOS has no built-in loopback device — nothing equivalent to Windows' Stereo
+Mix. To capture audio playing on the Mac rather than a microphone, install a
+virtual audio device:
+
+- **[BlackHole](https://existential.audio/blackhole/)** — free and open source.
+  `brew install blackhole-2ch`, or download the installer.
+- **Loopback** by Rogue Amoeba — paid, more capable.
+
+Once installed it appears in the **Input** dropdown like any other device. To
+hear the audio *and* capture it at the same time, make a **Multi-Output Device**
+in *Audio MIDI Setup* combining BlackHole with your speakers or headphones.
+
+For most work you will not need this: import the backing track as a file
+instead, which keeps it on its own fader and in time.
+
+## Also singing from an iPhone or iPad?
+
+Run **`./start-ios-server.sh`** in this folder instead. It serves over https so
+Safari on the device will hand over the microphone — see the iOS version's
+README for the one-time certificate steps.
+
+## Using it
+
+The full guide is in **[GUIDE.md](GUIDE.md)** — targets, lyrics, references, the
+accuracy score and the Trainer.
+
+---
+Built {stamp} from the shared Jayasongmatch source.
+"""
 
 
 def windows_readme(stamp: str) -> str:
@@ -350,6 +461,13 @@ def build(target: str, out_root: Path, guide: str) -> Path:
     if target == "windows":
         (destination / "start-windows.bat").write_text(WINDOWS_LAUNCHER, encoding="utf-8", newline="")
         (destination / "README.md").write_text(windows_readme(stamp), encoding="utf-8")
+    elif target == "macos":
+        for name, body in (("start-macos.command", MACOS_LAUNCHER),
+                           ("start-ios-server.sh", MACOS_IPAD_LAUNCHER)):
+            launcher = destination / name
+            launcher.write_text(body, encoding="utf-8")
+            launcher.chmod(0o755)  # Finder will not run a .command without this
+        (destination / "README.md").write_text(macos_readme(stamp), encoding="utf-8")
     else:
         (destination / "start-ios-server.bat").write_text(IOS_LAUNCHER, encoding="utf-8", newline="")
         launcher = destination / "start-ios-server.sh"
@@ -365,7 +483,7 @@ def build(target: str, out_root: Path, guide: str) -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build the Windows and iOS versions.")
+    parser = argparse.ArgumentParser(description="Build the Windows, macOS and iOS versions.")
     parser.add_argument("targets", nargs="*", metavar="TARGET",
                         help=f"which to build: {' or '.join(TARGETS)} (default: both)")
     parser.add_argument("--out", default="dist", help="output directory (default: dist)")

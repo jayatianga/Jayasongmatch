@@ -5,9 +5,9 @@
 // and the audio session is taken away on a phone call or when you switch apps.
 // The app adapts rather than pretending those differences do not exist.
 
-import { TARGET, IS_IOS_BUILD, IS_WINDOWS_BUILD } from './build.js';
+import { TARGET, IS_IOS_BUILD, IS_WINDOWS_BUILD, IS_MACOS_BUILD, IS_DESKTOP_BUILD } from './build.js';
 
-export { TARGET, IS_IOS_BUILD, IS_WINDOWS_BUILD };
+export { TARGET, IS_IOS_BUILD, IS_WINDOWS_BUILD, IS_MACOS_BUILD, IS_DESKTOP_BUILD };
 
 export const ua = navigator.userAgent;
 
@@ -17,6 +17,8 @@ export const isIOS = /iPad|iPhone|iPod/.test(ua) ||
   (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
 
 export const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(ua);
+/** A desktop Mac — an iPad reports the same user agent, so touch rules it out. */
+export const isMac = /Macintosh|Mac OS X/.test(ua) && !isIOS;
 export const isTouch = navigator.maxTouchPoints > 0 || 'ontouchstart' in window;
 export const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches ||
   window.navigator.standalone === true;
@@ -109,7 +111,7 @@ function supportsModuleWorker() {
  */
 export function canChooseInputDevice() {
   if (IS_IOS_BUILD) return false;
-  if (IS_WINDOWS_BUILD) return Boolean(navigator.mediaDevices?.enumerateDevices);
+  if (IS_DESKTOP_BUILD) return Boolean(navigator.mediaDevices?.enumerateDevices);
   return !isIOS && Boolean(navigator.mediaDevices?.enumerateDevices);
 }
 
@@ -163,9 +165,15 @@ export class ScreenLock {
 /** A short, honest description of what this platform can and cannot do. */
 export function platformNotes() {
   const notes = [];
-  if (IS_WINDOWS_BUILD) {
-    return notes; // the Windows build's own README covers its setup
+
+  // Each desktop build's own README covers its setup. The one thing worth
+  // saying inside the app is that macOS ships no loopback device, since a
+  // Windows user would go looking for the equivalent of Stereo Mix.
+  if (IS_MACOS_BUILD || (!IS_IOS_BUILD && !IS_WINDOWS_BUILD && isMac)) {
+    notes.push('macOS has no built-in loopback input. To capture what the Mac is playing, install BlackHole or Loopback — otherwise import backing tracks as files.');
   }
+  if (IS_DESKTOP_BUILD) return notes;
+
   if (isIOS || IS_IOS_BUILD) {
     notes.push('On iOS the system chooses the microphone — plug in an interface or headset and iOS will switch to it automatically.');
     notes.push('There is no loopback input on iOS, so import backing tracks as files rather than capturing what is playing.');

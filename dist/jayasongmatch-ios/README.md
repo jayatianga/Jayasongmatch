@@ -98,4 +98,4 @@ network, and some routers block devices from talking to each other ("AP
 isolation"). Guest networks usually do.
 
 ---
-Built 2026-08-07 from the shared Jayasongmatch source.
+Built 2026-08-26 from the shared Jayasongmatch source.

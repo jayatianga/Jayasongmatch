@@ -46,4 +46,4 @@ If you also want to sing from an iPhone or iPad, use the iOS version instead:
 it serves over https so Safari will hand over the microphone.
 
 ---
-Built 2026-08-07 from the shared Jayasongmatch source.
+Built 2026-08-26 from the shared Jayasongmatch source.

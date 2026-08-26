@@ -5,24 +5,42 @@ kind. Record each part of a section one at a time, hear the parts you have
 already sung while you record the next one, get a measured accuracy score for
 every part, and mix any part in or out as you go.
 
-Runs in Chrome or Edge on Windows, reads any Windows capture device, and keeps
-everything on your PC. Nothing is uploaded.
+Runs on Windows, macOS, iPhone and iPad. Everything stays on your own machine —
+nothing is uploaded.
 
 ---
 
 ## Getting started
 
-1. Install Python if you do not have it — [python.org/downloads/windows](https://www.python.org/downloads/windows/),
-   and tick **Add python.exe to PATH** during setup.
-2. Double-click **`start-windows.bat`**. A browser opens at `http://localhost:8770/`.
-3. Click the **⟳** button next to *Input* and allow microphone access when Windows
-   asks. Your capture devices now appear by name in the dropdown.
-4. **Put on headphones.** Everything below assumes the playback is not leaking
-   into your microphone.
+Whichever platform you are on: **put on headphones**. Everything below assumes
+the playback is not leaking into your microphone. To stop the server, press
+Ctrl+C in its window or close it.
 
-To stop, close the terminal window or press Ctrl+C in it.
+### On Windows
 
-> On a Mac or Linux box, run `python3 serve.py` instead. The app itself is the same.
+1. Install Python if you do not have it —
+   [python.org/downloads/windows](https://www.python.org/downloads/windows/),
+   ticking **Add python.exe to PATH** during setup.
+2. Double-click **`start-windows.bat`**. A browser opens at
+   `http://localhost:8770/`.
+3. Click **⟳** beside *Input* and allow microphone access, so your capture
+   devices appear by name.
+
+### On a Mac
+
+1. Double-click **`start-macos.command`**. Terminal opens, then a browser at
+   `http://localhost:8770/`.
+   - First time, macOS may say it is *from an unidentified developer* — right-click
+     the file → **Open** → **Open**. That is Gatekeeper quarantining a downloaded
+     file, and it only asks once.
+   - If it reports `python3: command not found`, run `xcode-select --install`.
+2. Click **⟳** beside *Input* and allow microphone access.
+
+From the source tree instead of a build, `python3 serve.py` does the same thing.
+
+macOS ships no loopback device, so to capture what the Mac is playing install
+[BlackHole](https://existential.audio/blackhole/) (free) or Loopback — otherwise
+import backing tracks as files, which is the easier route anyway.
 
 ### On an iPhone or iPad
 
@@ -57,26 +75,32 @@ check your whole signal path before touching a real song:
 
 How the app actually works — targets, lyrics, references, the accuracy
 score and the Trainer — is in **[docs/guide.md](docs/guide.md)**. That guide
-ships inside both built versions as `GUIDE.md`.
+ships inside all three built versions as `GUIDE.md`.
 
 ---
 
 ## Platforms
 
-| | Windows / macOS / Linux | iPhone / iPad |
-|---|---|---|
-| Recording, scoring, Trainer | yes | yes |
-| Choose input device and channel | yes | no — iOS picks the device |
-| Loopback capture (Stereo Mix and similar) | yes | no — import files instead |
-| Install to Home Screen, works offline | — | yes |
-| Needs | a browser | iOS 15.4+, and HTTPS via `--https` |
+| | Windows | macOS | iPhone / iPad |
+|---|---|---|---|
+| Recording, scoring, Trainer | yes | yes | yes |
+| Choose input device and channel | yes | yes | no — iOS picks the device |
+| Loopback capture | Stereo Mix, VoiceMeeter | needs BlackHole or Loopback | no — import files |
+| Install to Home Screen, offline | — | — | yes |
+| Launcher | `start-windows.bat` | `start-macos.command` | `start-ios-server.bat` / `.sh` |
+| Needs | a browser | Safari 14.1+ or Chrome | iOS 15.4+, and HTTPS |
+
+Linux works too — run `python3 serve.py` from the source tree; there is no
+separate build for it.
 
 The app checks what the platform supports when it starts and says plainly which
 piece is missing, rather than failing part-way through a take.
 
 ---
 
-## Windows input notes
+## Input notes
+
+### Windows
 
 The **Input** dropdown lists every Windows capture endpoint, so you can use:
 
@@ -88,7 +112,18 @@ The **Input** dropdown lists every Windows capture endpoint, so you can use:
 If Stereo Mix does not appear, enable it in *Sound settings → More sound
 settings → Recording → right-click → Show Disabled Devices*.
 
-Windows voice processing is switched off deliberately — echo cancellation, noise
+### macOS
+
+The same dropdown lists every Core Audio input. macOS ships no loopback device,
+so to record what the Mac is playing install
+[BlackHole](https://existential.audio/blackhole/) (`brew install blackhole-2ch`)
+or Rogue Amoeba's Loopback. To hear the audio *and* capture it, build a
+Multi-Output Device in *Audio MIDI Setup* combining the virtual device with your
+headphones.
+
+### Both
+
+Browser voice processing is switched off deliberately — echo cancellation, noise
 suppression and auto gain all distort sung pitch and would make the scores
 meaningless. If your input sounds gated or hollow, check for processing enabled
 in your interface's own control panel.
@@ -98,34 +133,40 @@ back and will also pollute your recording; use headphones.
 
 ---
 
-## Building the two versions
+## Building the three versions
 
 This source tree is the *universal* build: it keeps every platform's code and
-decides what to show at runtime. `build.py` turns it into two self-contained
+decides what to show at runtime. `build.py` turns it into three self-contained
 distributions that can be copied anywhere and run on their own:
 
 ```
-python build.py            # both
-python build.py windows    # just one
+python build.py            # all three
+python build.py macos      # just one
 ```
 
 ```
 dist/
   jayasongmatch-windows/   double-click start-windows.bat
-  jayasongmatch-ios/       double-click start-ios-server.bat
+  jayasongmatch-macos/     double-click start-macos.command
+  jayasongmatch-ios/       double-click start-ios-server.bat (or .sh)
 ```
 
-| | Windows build | iOS build |
-|---|---|---|
-| Input and channel pickers | included | left out — iOS chooses the device |
-| Loopback capture notes | included | not applicable |
-| Connection | `http://localhost` | `https` with a trustable certificate |
-| Manifest, icons, service worker | no | yes — installs to the Home Screen, works offline |
-| Launcher | `start-windows.bat` | `start-ios-server.bat` / `.sh` |
+| | Windows | macOS | iOS |
+|---|---|---|---|
+| Input and channel pickers | yes | yes | left out — iOS chooses the device |
+| Loopback notes | Stereo Mix | BlackHole / Loopback | not applicable |
+| Connection | `http://localhost` | `http://localhost` | `https` with a trustable certificate |
+| Manifest, icons, service worker | no | no | yes — Home Screen install, offline |
+| Launcher | `.bat` | `.command` (executable) | `.bat` and `.sh`, both `--https` |
 
-Both contain the same recorder, scoring, lyrics and Trainer code. The
+All three contain the same recorder, scoring, lyrics and Trainer code. The
 difference is which controls exist, how the server is started, and what each
-README explains.
+README explains. The macOS build also carries `start-ios-server.sh`, so a Mac
+can serve to an iPad without a second copy.
+
+Markup that belongs to one platform is wrapped in
+`<!-- build:windows,macos -->` … `<!-- /build:windows,macos -->`; the builder
+keeps the matching block, strips the rest, and removes the markers.
 
 Edit the source, not `dist/` — a rebuild overwrites it. Which build is running
 is decided by the generated `js/build.js`; in the source tree it says

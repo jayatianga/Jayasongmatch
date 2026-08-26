@@ -41,29 +41,61 @@ if (PYTHON) {
 const skipUnbuilt = buildError ?? false;
 
 const win = (...parts) => join(out, 'jayasongmatch-windows', ...parts);
+const mac = (...parts) => join(out, 'jayasongmatch-macos', ...parts);
 const ios = (...parts) => join(out, 'jayasongmatch-ios', ...parts);
+const desktop = [win, mac];
+const all = [win, mac, ios];
 
-test('build.py produces both versions', { skip: skipUnbuilt }, () => {
-  assert.ok(existsSync(join(out, 'jayasongmatch-windows')), 'windows build exists');
-  assert.ok(existsSync(join(out, 'jayasongmatch-ios')), 'ios build exists');
+test('build.py produces all three versions', { skip: skipUnbuilt }, () => {
+  for (const name of ['windows', 'macos', 'ios']) {
+    assert.ok(existsSync(join(out, `jayasongmatch-${name}`)), `${name} build exists`);
+  }
 });
 
 test('each build declares which one it is', { skip: skipUnbuilt }, () => {
   assert.match(readFileSync(win('js', 'build.js'), 'utf8'), /TARGET = 'windows'/);
+  assert.match(readFileSync(mac('js', 'build.js'), 'utf8'), /TARGET = 'macos'/);
   assert.match(readFileSync(ios('js', 'build.js'), 'utf8'), /TARGET = 'ios'/);
   // The source tree stays universal so it still runs directly.
   assert.match(readFileSync(join(ROOT, 'js', 'build.js'), 'utf8'), /TARGET = 'universal'/);
 });
 
-test('the Windows build keeps the input pickers and drops the app manifest', { skip: skipUnbuilt }, () => {
-  const html = readFileSync(win('index.html'), 'utf8');
-  assert.match(html, /id="device-select"/);
-  assert.match(html, /id="channel-select"/);
-  assert.ok(!html.includes('rel="manifest"'), 'no web app manifest');
-  assert.ok(!html.includes('apple-touch-icon'), 'no iOS icon');
-  assert.ok(!existsSync(win('manifest.json')));
-  assert.ok(!existsSync(win('sw.js')), 'no service worker to 404 on');
-  assert.ok(!existsSync(win('assets')));
+test('both desktop builds keep the input pickers and drop the app manifest', { skip: skipUnbuilt }, () => {
+  for (const at of desktop) {
+    const html = readFileSync(at('index.html'), 'utf8');
+    assert.match(html, /id="device-select"/);
+    assert.match(html, /id="channel-select"/);
+    assert.ok(!html.includes('rel="manifest"'), 'no web app manifest');
+    assert.ok(!html.includes('apple-touch-icon'), 'no iOS icon');
+    assert.ok(!existsSync(at('manifest.json')));
+    assert.ok(!existsSync(at('sw.js')), 'no service worker to 404 on');
+    assert.ok(!existsSync(at('assets')));
+  }
+});
+
+test('the macOS build has an executable double-click launcher', { skip: skipUnbuilt }, () => {
+  const launcher = mac('start-macos.command');
+  assert.ok(existsSync(launcher));
+  // Finder refuses to run a .command without the executable bit.
+  assert.ok(statSync(launcher).mode & 0o111, 'start-macos.command must be executable');
+  const body = readFileSync(launcher, 'utf8');
+  assert.match(body, /^#!\/bin\/sh/, 'needs a shebang to run');
+  assert.match(body, /cd "\$\(dirname "\$0"\)"/, 'must run from its own folder, not the home directory');
+  assert.match(body, /python3 serve\.py/);
+  assert.ok(!/--https/.test(body), 'the plain launcher stays on http for localhost');
+
+  // It also carries the https launcher, for serving to an iPad.
+  const ipad = mac('start-ios-server.sh');
+  assert.ok(existsSync(ipad));
+  assert.ok(statSync(ipad).mode & 0o111);
+  assert.match(readFileSync(ipad, 'utf8'), /--https/);
+});
+
+test('the macOS build explains the two things that trip people up', { skip: skipUnbuilt }, () => {
+  const readme = readFileSync(mac('README.md'), 'utf8');
+  assert.match(readme, /quarantine/i, 'Gatekeeper blocks a downloaded .command');
+  assert.match(readme, /BlackHole|Loopback/, 'macOS has no built-in loopback device');
+  assert.match(readme, /xcode-select --install|python\.org/, 'python3 may be missing');
 });
 
 test('the iOS build drops the input pickers and ships the installable pieces', { skip: skipUnbuilt }, () => {
@@ -77,15 +109,18 @@ test('the iOS build drops the input pickers and ships the installable pieces', {
   assert.ok(existsSync(ios('assets', 'icon-180.png')));
 });
 
-test('no build markers survive into either build', { skip: skipUnbuilt }, () => {
-  for (const html of [readFileSync(win('index.html'), 'utf8'), readFileSync(ios('index.html'), 'utf8')]) {
-    assert.ok(!/build:(ios|windows)/.test(html), 'marker comments are stripped');
+test('no build markers survive into any build', { skip: skipUnbuilt }, () => {
+  for (const at of all) {
+    const html = readFileSync(at('index.html'), 'utf8');
+    assert.ok(!/build:(ios|windows|macos)/.test(html), 'marker comments are stripped');
   }
 });
 
 test('each build has its own launcher and README', { skip: skipUnbuilt }, () => {
   assert.ok(existsSync(win('start-windows.bat')));
   assert.ok(!existsSync(win('start-ios-server.bat')));
+  assert.ok(!existsSync(win('start-macos.command')), 'no Mac launcher in the Windows build');
+  assert.ok(!existsSync(mac('start-windows.bat')), 'no .bat in the Mac build');
   assert.ok(existsSync(ios('start-ios-server.bat')));
   assert.ok(existsSync(ios('start-ios-server.sh')));
 
@@ -94,11 +129,12 @@ test('each build has its own launcher and README', { skip: skipUnbuilt }, () => 
   assert.ok(!/serve\.py --https/.test(readFileSync(win('start-windows.bat'), 'utf8')));
 
   assert.match(readFileSync(win('README.md'), 'utf8'), /Windows/);
+  assert.match(readFileSync(mac('README.md'), 'utf8'), /macOS/);
   assert.match(readFileSync(ios('README.md'), 'utf8'), /iOS|iPhone/);
 });
 
-test('both builds carry the shared guide and the shared app code', { skip: skipUnbuilt }, () => {
-  for (const at of [win, ios]) {
+test('every build carries the shared guide and the shared app code', { skip: skipUnbuilt }, () => {
+  for (const at of all) {
     assert.ok(existsSync(at('GUIDE.md')));
     assert.ok(existsSync(at('serve.py')));
     assert.ok(existsSync(at('css', 'app.css')));
@@ -113,7 +149,7 @@ test('both builds carry the shared guide and the shared app code', { skip: skipU
 test('every module a build imports is present in that build', { skip: skipUnbuilt }, () => {
   // A missing file would only show up as a blank page at runtime, so the
   // import graph is walked here instead.
-  for (const at of [win, ios]) {
+  for (const at of all) {
     const root = at();
     const files = [];
     const walk = (dir) => {
@@ -137,7 +173,7 @@ test('every module a build imports is present in that build', { skip: skipUnbuil
 });
 
 test('no source-only tooling leaks into a build', { skip: skipUnbuilt }, () => {
-  for (const at of [win, ios]) {
+  for (const at of all) {
     assert.ok(!existsSync(at('build.py')), 'the builder does not ship itself');
     assert.ok(!existsSync(at('tests')));
     assert.ok(!existsSync(at('node_modules')));

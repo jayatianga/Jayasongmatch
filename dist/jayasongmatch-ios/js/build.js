@@ -4,5 +4,7 @@
 export const TARGET = 'ios';
 
 export const IS_WINDOWS_BUILD = TARGET === 'windows';
+export const IS_MACOS_BUILD = TARGET === 'macos';
 export const IS_IOS_BUILD = TARGET === 'ios';
+export const IS_DESKTOP_BUILD = IS_WINDOWS_BUILD || IS_MACOS_BUILD;
 export const IS_UNIVERSAL_BUILD = TARGET === 'universal';

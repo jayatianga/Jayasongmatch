@@ -35,17 +35,17 @@
   </div>
 
   <div class="group input-group">
-    <!-- build:windows -->
+    <!-- build:windows,macos -->
     <label class="field">
       <span>Input</span>
-      <select id="device-select" title="Any Windows capture device: interface input, USB mic, or a loopback such as Stereo Mix"></select>
+      <select id="device-select" title="Any capture device: interface input, USB mic, or a loopback device"></select>
     </label>
     <label class="field narrow">
       <span>Ch</span>
       <select id="channel-select" title="Which channel of a multi-channel interface to record"></select>
     </label>
-    <button id="refresh-devices" class="icon-btn" title="Rescan Windows input devices">⟳</button>
-    <!-- /build:windows -->
+    <button id="refresh-devices" class="icon-btn" title="Rescan input devices">⟳</button>
+    <!-- /build:windows,macos -->
     <div class="meter" title="Input level"><div class="meter-fill" id="input-meter"></div></div>
     <button id="monitor-btn" class="toggle" title="Hear yourself through the app (use headphones)">Monitor</button>
   </div>
